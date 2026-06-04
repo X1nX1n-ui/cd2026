@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.PermissionMapper">
+
+    <resultMap id="PermissionResultMap" type="com.cd.entity.Permission">
+        <id property="id" column="id"/>
+        <result property="permissionName" column="permission_name"/>
+        <result property="permissionCode" column="permission_code"/>
+        <result property="permissionType" column="permission_type" javaType="com.cd.entity.PermissionType"/>
+        <result property="parentId" column="parent_id"/>
+        <result property="routePath" column="route_path"/>
+        <result property="componentPath" column="component_path"/>
+        <result property="icon" column="icon"/>
+        <result property="sortNo" column="sort_no"/>
+        <result property="visible" column="visible"/>
+        <result property="description" column="description"/>
+        <result property="deleted" column="deleted"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id, permission_name, permission_code, permission_type, parent_id, route_path, component_path, icon, sort_no, visible, description, deleted, created_at, updated_at
+    </sql>
+
+    <select id="selectPage" resultMap="PermissionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `permission`
+        <where>
+            deleted = 0
+            <if test="permissionName != null and permissionName != ''">
+                AND permission_name LIKE CONCAT('%', #{permissionName}, '%')
+            </if>
+        </where>
+        ORDER BY sort_no ASC, id ASC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM `permission`
+        <where>
+            deleted = 0
+            <if test="permissionName != null and permissionName != ''">
+                AND permission_name LIKE CONCAT('%', #{permissionName}, '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="selectById" resultMap="PermissionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `permission`
+        WHERE id = #{id}
+          AND deleted = 0
+    </select>
+
+    <select id="selectByCode" resultMap="PermissionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `permission`
+        WHERE permission_code = #{permissionCode}
+          AND deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectAll" resultMap="PermissionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `permission`
+        WHERE deleted = 0
+        ORDER BY sort_no ASC, id ASC
+    </select>
+
+    <select id="selectAllVisibleMenus" resultMap="PermissionResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `permission`
+        WHERE deleted = 0
+          AND permission_type = 'MENU'
+          AND visible = 1
+        ORDER BY sort_no ASC, id ASC
+    </select>
+
+    <select id="selectMenusByUserId" resultMap="PermissionResultMap">
+        SELECT DISTINCT p.id,
+                        p.permission_name,
+                        p.permission_code,
+                        p.permission_type,
+                        p.parent_id,
+                        p.route_path,
+                        p.component_path,
+                        p.icon,
+                        p.sort_no,
+                        p.visible,
+                        p.description,
+                        p.deleted,
+                        p.created_at,
+                        p.updated_at
+        FROM `permission` p
+                 INNER JOIN role_permission rp ON rp.permission_id = p.id
+                 INNER JOIN user_role ur ON ur.role_id = rp.role_id
+                 INNER JOIN `role` r ON r.id = ur.role_id AND r.deleted = 0
+        WHERE ur.user_id = #{userId}
+          AND p.deleted = 0
+          AND p.permission_type = 'MENU'
+          AND p.visible = 1
+        ORDER BY p.sort_no ASC, p.id ASC
+    </select>
+
+    <select id="selectPermissionCodesByUserId" resultType="string">
+        SELECT DISTINCT p.permission_code
+        FROM `permission` p
+                 INNER JOIN role_permission rp ON rp.permission_id = p.id
+                 INNER JOIN user_role ur ON ur.role_id = rp.role_id
+                 INNER JOIN `role` r ON r.id = ur.role_id AND r.deleted = 0
+        WHERE ur.user_id = #{userId}
+          AND p.deleted = 0
+        ORDER BY p.permission_code ASC
+    </select>
+
+    <select id="countChildrenByParentId" resultType="long">
+        SELECT COUNT(1)
+        FROM `permission`
+        WHERE parent_id = #{parentId}
+          AND deleted = 0
+    </select>
+
+    <insert id="insert" parameterType="com.cd.entity.Permission" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `permission` (
+            permission_name,
+            permission_code,
+            permission_type,
+            parent_id,
+            route_path,
+            component_path,
+            icon,
+            sort_no,
+            visible,
+            description,
+            deleted
+        ) VALUES (
+            #{permissionName},
+            #{permissionCode},
+            #{permissionType},
+            #{parentId},
+            #{routePath},
+            #{componentPath},
+            #{icon},
+            #{sortNo},
+            #{visible},
+            #{description},
+            0
+        )
+    </insert>
+
+    <update id="update" parameterType="com.cd.entity.Permission">
+        UPDATE `permission`
+        <set>
+            <if test="permissionName != null">permission_name = #{permissionName},</if>
+            <if test="permissionCode != null">permission_code = #{permissionCode},</if>
+            <if test="permissionType != null">permission_type = #{permissionType},</if>
+            parent_id = #{parentId},
+            route_path = #{routePath},
+            component_path = #{componentPath},
+            icon = #{icon},
+            sort_no = #{sortNo},
+            visible = #{visible},
+            description = #{description},
+            <if test="deleted != null">deleted = #{deleted},</if>
+        </set>
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="deleteById">
+        UPDATE `permission`
+        SET deleted = 1
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <delete id="deleteRolePermissionsByPermissionId">
+        DELETE FROM role_permission
+        WHERE permission_id = #{permissionId}
+    </delete>
+</mapper>

@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>主机管理</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>主机管理</h1>
+                <p>实时展示主机在线状态，支持按心跳自动判定在线与离线，并提供主机详情查看。</p>
+            </div>
+        </section>
+
+        <section class="page-filter">
+            <form class="layui-form page-filter-form" id="searchForm">
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <input type="text" name="keyword" placeholder="请输入主机名、IP、MAC 或系统名称" autocomplete="off" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <select name="status">
+                            <option value="">全部状态</option>
+                            <option value="1">在线</option>
+                            <option value="0">下线</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="layui-btn page-btn">查询</button>
+                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+            </form>
+            <div class="page-toolbar">
+                <button type="button" class="layui-btn page-secondary-btn" id="refreshButton">刷新数据</button>
+                <div class="layui-form host-refresh-form">
+                    <div class="layui-input-inline">
+                        <select id="autoRefreshSelect">
+                            <option value="0">不刷新</option>
+                            <option value="1">1秒</option>
+                            <option value="3">3秒</option>
+                            <option value="5">5秒</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="host-refresh-hint" id="refreshHint">当前为手动刷新模式</div>
+            </div>
+        </section>
+
+        <section class="page-table-card">
+            <table id="hostTable" lay-filter="hostTable"></table>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["table", "form", "layer"], function () {
+        const table = layui.table;
+        const form = layui.form;
+        const layer = layui.layer;
+        const searchForm = document.getElementById("searchForm");
+        const resetSearch = document.getElementById("resetSearch");
+        const refreshButton = document.getElementById("refreshButton");
+        const autoRefreshSelect = document.getElementById("autoRefreshSelect");
+        const refreshHint = document.getElementById("refreshHint");
+        const canUpdate = PlatformUtils.hasPermission("asset:host:update");
+        const canDelete = PlatformUtils.hasPermission("asset:host:delete");
+
+        let autoRefreshTimer = null;
+        let isReloading = false;
+        let lastKnownPage = 1;
+
+        init();
+
+        function init() {
+            bindActions();
+            renderTable();
+            form.render();
+        }
+
+        function bindActions() {
+            searchForm.addEventListener("submit", function (event) {
+                event.preventDefault();
+                reloadTable(true);
+            });
+
+            resetSearch.addEventListener("click", function () {
+                searchForm.reset();
+                autoRefreshSelect.value = "0";
+                clearAutoRefresh();
+                form.render("select");
+                updateRefreshHint();
+                reloadTable(true);
+            });
+
+            refreshButton.addEventListener("click", function () {
+                reloadTable(false);
+            });
+
+            form.on("select", function (data) {
+                if (data.elem && data.elem.id === "autoRefreshSelect") {
+                    configureAutoRefresh(data.value);
+                }
+            });
+        }
+
+        function renderTable() {
+            table.render({
+                elem: "#hostTable",
+                id: "hostTable",
+                url: "/api/hosts/page",
+                method: "GET",
+                headers: PlatformUtils.authHeaders(),
+                page: true,
+                limits: [10, 20, 30],
+                limit: 10,
+                where: getSearchParams(),
+                even: true,
+                skin: "line",
+                request: {
+                    pageName: "pageNo",
+                    limitName: "pageSize"
+                },
+                parseData: function (result) {
+                    return {
+                        code: 0,
+                        msg: "",
+                        count: result.total || 0,
+                        data: result.records || []
+                    };
+                },
+                done: function (_, curr) {
+                    lastKnownPage = curr || lastKnownPage || 1;
+                    const tableView = document.querySelector("#hostTable + .layui-table-view");
+                    if (tableView) {
+                        tableView.classList.remove("host-table-refreshing");
+                    }
+                    isReloading = false;
+                },
+                cols: [[
+                    {field: "id", title: "ID", width: 80},
+                    {field: "hostname", title: "主机名", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.hostname); }},
+                    {field: "ipAddress", title: "主IP", minWidth: 160, templet: function (row) { return PlatformUtils.renderValue(row.ipAddress); }},
+                    {field: "macAddress", title: "MAC", minWidth: 170, templet: function (row) { return PlatformUtils.renderValue(row.macAddress); }},
+                    {field: "osName", title: "操作系统", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.osName || row.osDetail); }},
+                    {field: "memoryUsage", title: "内存占用", minWidth: 150, templet: function (row) { return renderMemoryUsage(row); }},
+                    {field: "status", title: "状态", width: 120, templet: function (row) { return PlatformUtils.renderHostStatus(row.status); }},
+                    {title: "操作", minWidth: 220, fixed: "right", templet: function () { return renderActions(); }}
+                ]]
+            });
+
+            table.on("tool(hostTable)", function (obj) {
+                if (obj.event === "detail") {
+                    openDetailDialog(obj.data.id);
+                    return;
+                }
+
+                if (obj.event === "edit") {
+                    openHostDialog("编辑主机", obj.data);
+                    return;
+                }
+
+                if (obj.event === "delete") {
+                    layer.confirm("确认删除当前主机吗？", {title: "删除主机"}, function (index) {
+                        PlatformUtils.request("/api/hosts/" + obj.data.id, {method: "DELETE"})
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("删除成功");
+                                reloadTable(false);
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "删除失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function reloadTable(resetPage) {
+            if (isReloading) {
+                return;
+            }
+
+            isReloading = true;
+            const tableView = document.querySelector("#hostTable + .layui-table-view");
+            if (tableView) {
+                tableView.classList.add("host-table-refreshing");
+            }
+            table.reloadData("hostTable", {
+                headers: PlatformUtils.authHeaders(),
+                where: getSearchParams(),
+                scrollPos: resetPage ? "reset" : "fixed",
+                loading: false,
+                page: {
+                    curr: resetPage ? 1 : lastKnownPage
+                }
+            });
+        }
+
+        function getSearchParams() {
+            return {
+                keyword: searchForm.querySelector('input[name="keyword"]').value.trim(),
+                status: searchForm.querySelector('select[name="status"]').value
+            };
+        }
+
+        function renderActions() {
+            const actions = [
+                '<a class="layui-btn layui-btn-xs page-btn" lay-event="detail">详情</a>'
+            ];
+            if (canUpdate) {
+                actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="edit">编辑</a>');
+            }
+            if (canDelete) {
+                actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
+            }
+            return actions.join("") || '<span class="table-empty-action">--</span>';
+        }
+
+        function configureAutoRefresh(value) {
+            clearAutoRefresh();
+            const seconds = Number(value || 0);
+            updateRefreshHint(seconds);
+            if (seconds <= 0) {
+                return;
+            }
+
+            autoRefreshTimer = window.setInterval(function () {
+                reloadTable(false);
+            }, seconds * 1000);
+        }
+
+        function clearAutoRefresh() {
+            if (autoRefreshTimer) {
+                window.clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+        }
+
+        function updateRefreshHint(seconds) {
+            if (!seconds) {
+                refreshHint.textContent = "当前为手动刷新模式";
+                return;
+            }
+            refreshHint.textContent = "列表每 " + seconds + " 秒自动刷新一次";
+        }
+
+        function renderMemoryUsage(row) {
+            const available = parseMemoryValue(row.memoryAvailable);
+            const total = parseMemoryValue(row.memoryTotal);
+            if (!available || !total || total.value <= 0 || available.unit !== total.unit) {
+                return PlatformUtils.renderValue(row.memoryAvailable && row.memoryTotal
+                    ? row.memoryAvailable + " / " + row.memoryTotal
+                    : "--");
+            }
+
+            const used = Math.max(total.value - available.value, 0);
+            const percent = Math.min(Math.max((used / total.value) * 100, 0), 100);
+            return '<div class="memory-usage-cell">'
+                + '<div class="memory-usage-meta">'
+                + '<span>' + PlatformUtils.escapeHtml(used.toFixed(2) + " " + total.unit) + '</span>'
+                + '<span>' + PlatformUtils.escapeHtml(percent.toFixed(0) + "%") + '</span>'
+                + '</div>'
+                + '<div class="memory-usage-track"><span style="width:' + percent.toFixed(2) + '%;"></span></div>'
+                + '</div>';
+        }
+
+        function parseMemoryValue(value) {
+            if (!value) {
+                return null;
+            }
+            const match = String(value).trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z]+)$/);
+            if (!match) {
+                return null;
+            }
+            return {
+                value: Number(match[1]),
+                unit: match[2].toUpperCase()
+            };
+        }
+
+        function openDetailDialog(hostId) {
+            PlatformUtils.request("/api/hosts/" + hostId)
+                .then(function (host) {
+                    const dialogWidth = Math.min(window.innerWidth - 32, 980) + "px";
+                    layer.open({
+                        type: 1,
+                        title: "主机详情",
+                        area: [dialogWidth, "auto"],
+                        shadeClose: true,
+                        content: buildHostDetail(host)
+                    });
+                })
+                .catch(function (error) {
+                    layer.msg(error.message || "获取主机详情失败");
+                });
+        }
+
+        function buildHostDetail(host) {
+            const baseItems = [
+                renderDetailItem("ID", host.id),
+                renderDetailItem("主机名", host.hostname),
+                renderDetailItem("主IP", host.ipAddress),
+                renderDetailItem("MAC", host.macAddress),
+                renderDetailItem("状态", PlatformUtils.renderHostStatus(host.status), true),
+                renderDetailItem("操作系统", host.osName),
+                renderDetailItem("系统类型", host.osType),
+                renderDetailItem("系统版本", host.osVersion),
+                renderDetailItem("系统详情", host.osDetail),
+                renderDetailItem("CPU 架构", host.cpuArchitecture),
+                renderDetailItem("CPU 名称", host.cpuName),
+                renderDetailItem("逻辑核心", host.logicalCores),
+                renderDetailItem("可用内存", host.memoryAvailable),
+                renderDetailItem("总内存", host.memoryTotal),
+                renderDetailItem("最后上报时间", PlatformUtils.formatDateTime(host.lastSeenAt)),
+                renderDetailItem("更新时间", PlatformUtils.formatDateTime(host.updatedAt)),
+                renderDetailItem("创建时间", PlatformUtils.formatDateTime(host.createdAt)),
+                renderDetailItem("来源队列", host.sourceQueue)
+            ];
+
+            return '<div class="host-detail-panel">'
+                + '<div class="host-detail-hero">'
+                + '<div>'
+                + '<h2>' + PlatformUtils.escapeHtml(host.hostname || "未命名主机") + '</h2>'
+                + '<p>' + PlatformUtils.escapeHtml(host.ipAddress || "--") + " / " + PlatformUtils.escapeHtml(host.macAddress || "--") + '</p>'
+                + '</div>'
+                + '<div>' + PlatformUtils.renderHostStatus(host.status) + '</div>'
+                + '</div>'
+                + '<div class="host-detail-grid">' + baseItems.join("") + '</div>'
+                + '<div class="host-detail-raw">'
+                + '<div class="host-detail-section-title">原始上报数据</div>'
+                + '<pre>' + PlatformUtils.escapeHtml(host.rawPayload || "--") + '</pre>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderDetailItem(label, value, isStatus) {
+            return '<div class="host-detail-item">'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<strong>' + (isStatus ? value : PlatformUtils.renderValue(value)) + '</strong>'
+                + '</div>';
+        }
+
+        function openHostDialog(title, host) {
+            const dialogWidth = Math.min(window.innerWidth - 32, 920) + "px";
+
+            layer.open({
+                type: 1,
+                title: title,
+                area: [dialogWidth, "auto"],
+                shadeClose: false,
+                content: buildHostForm(host),
+                success: function (layero, index) {
+                    const rootElement = layero[0] || layero;
+                    const formElement = rootElement.querySelector("form");
+                    const cancelButton = rootElement.querySelector(".dialog-cancel");
+
+                    cancelButton.addEventListener("click", function () {
+                        layer.close(index);
+                    });
+
+                    form.render();
+
+                    formElement.addEventListener("submit", function (event) {
+                        event.preventDefault();
+                        const formData = new FormData(formElement);
+                        const payload = {
+                            hostname: String(formData.get("hostname") || "").trim(),
+                            ipAddress: String(formData.get("ipAddress") || "").trim(),
+                            macAddress: String(formData.get("macAddress") || "").trim(),
+                            cpuArchitecture: String(formData.get("cpuArchitecture") || "").trim(),
+                            cpuName: String(formData.get("cpuName") || "").trim(),
+                            logicalCores: formData.get("logicalCores") ? Number(formData.get("logicalCores")) : null,
+                            memoryAvailable: String(formData.get("memoryAvailable") || "").trim(),
+                            memoryTotal: String(formData.get("memoryTotal") || "").trim(),
+                            osDetail: String(formData.get("osDetail") || "").trim(),
+                            osName: String(formData.get("osName") || "").trim(),
+                            osType: String(formData.get("osType") || "").trim(),
+                            osVersion: String(formData.get("osVersion") || "").trim(),
+                            status: formData.get("status")
+                        };
+
+                        if (!payload.hostname) {
+                            layer.msg("请输入主机名");
+                            return;
+                        }
+                        if (!payload.macAddress) {
+                            layer.msg("请输入 MAC 地址");
+                            return;
+                        }
+
+                        PlatformUtils.request("/api/hosts/" + host.id, {
+                            method: "PUT",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("更新成功");
+                                reloadTable(false);
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "保存失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function buildHostForm(host) {
+            return '<form class="layui-form page-form">'
+                + '<div class="dialog-grid">'
+                + renderInput("主机名", "hostname", host ? host.hostname : "")
+                + renderInput("IP 地址", "ipAddress", host ? host.ipAddress : "")
+                + renderInput("MAC 地址", "macAddress", host ? host.macAddress : "")
+                + renderInput("CPU 架构", "cpuArchitecture", host ? host.cpuArchitecture : "")
+                + renderInput("CPU 名称", "cpuName", host ? host.cpuName : "")
+                + renderInput("逻辑核心", "logicalCores", host ? host.logicalCores : "", false, "请输入逻辑核心数", "number")
+                + renderInput("可用内存", "memoryAvailable", host ? host.memoryAvailable : "")
+                + renderInput("总内存", "memoryTotal", host ? host.memoryTotal : "")
+                + renderInput("系统详情", "osDetail", host ? host.osDetail : "")
+                + renderInput("系统名称", "osName", host ? host.osName : "")
+                + renderInput("系统类型", "osType", host ? host.osType : "")
+                + renderInput("系统版本", "osVersion", host ? host.osVersion : "")
+                + renderSelect("状态", "status", host ? String(host.status || "0") : "0", [
+                    {value: "1", label: "在线"},
+                    {value: "0", label: "下线"}
+                ])
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn dialog-cancel">取消</button>'
+                + '<button type="submit" class="layui-btn page-btn">保存</button>'
+                + '</div>'
+                + '</form>';
+        }
+
+        function renderInput(label, name, value, readonly, placeholder, type) {
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<input type="' + (type || "text") + '" name="' + name + '" value="' + PlatformUtils.escapeHtml(value || "") + '"'
+                + (readonly ? ' readonly' : '')
+                + ' placeholder="' + PlatformUtils.escapeHtml(placeholder || ("请输入" + label)) + '" autocomplete="off" class="layui-input">'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderSelect(label, name, currentValue, options) {
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<select name="' + name + '">'
+                + options.map(function (option) {
+                    const selected = option.value === currentValue ? ' selected' : '';
+                    return '<option value="' + option.value + '"' + selected + '>' + option.label + '</option>';
+                }).join("")
+                + '</select>'
+                + '</div>'
+                + '</div>';
+        }
+    });
+</script>
+</body>
+</html>

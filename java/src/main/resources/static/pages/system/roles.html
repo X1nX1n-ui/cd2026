@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>角色管理</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>角色管理</h1>
+                <p>支持角色分页、搜索，以及通过复选框分配权限。</p>
+            </div>
+        </section>
+
+        <section class="page-filter">
+            <form class="layui-form page-filter-form" id="searchForm">
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <input type="text" name="roleName" placeholder="请输入角色名称查询" autocomplete="off" class="layui-input">
+                    </div>
+                </div>
+                <button type="submit" class="layui-btn page-btn">查询</button>
+                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+            </form>
+            <div class="page-toolbar" id="pageToolbar"></div>
+        </section>
+
+        <section class="page-table-card">
+            <table id="roleTable" lay-filter="roleTable"></table>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["table", "form", "layer"], function () {
+        const table = layui.table;
+        const form = layui.form;
+        const layer = layui.layer;
+        const searchForm = document.getElementById("searchForm");
+        const resetSearch = document.getElementById("resetSearch");
+        const pageToolbar = document.getElementById("pageToolbar");
+        const canCreate = PlatformUtils.hasPermission("sys:role:create");
+        const canUpdate = PlatformUtils.hasPermission("sys:role:update");
+        const canDelete = PlatformUtils.hasPermission("sys:role:delete");
+        let permissionOptions = [];
+
+        init();
+
+        function init() {
+            renderToolbar();
+            bindSearch();
+            loadPermissionOptions().then(renderTable);
+        }
+
+        function renderToolbar() {
+            if (!canCreate) {
+                return;
+            }
+            pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createRoleButton">新增角色</button>';
+            document.getElementById("createRoleButton").addEventListener("click", function () {
+                openRoleDialog("新增角色");
+            });
+        }
+
+        function bindSearch() {
+            searchForm.addEventListener("submit", function (event) {
+                event.preventDefault();
+                reloadTable();
+            });
+            resetSearch.addEventListener("click", function () {
+                searchForm.reset();
+                reloadTable();
+            });
+        }
+
+        function loadPermissionOptions() {
+            return PlatformUtils.request("/api/permissions/options")
+                .then(function (data) {
+                    permissionOptions = Array.isArray(data) ? data : [];
+                })
+                .catch(function (error) {
+                    permissionOptions = [];
+                    layer.msg(error.message || "权限选项加载失败");
+                });
+        }
+
+        function renderTable() {
+            table.render({
+                elem: "#roleTable",
+                id: "roleTable",
+                url: "/api/roles/page",
+                method: "GET",
+                headers: PlatformUtils.authHeaders(),
+                page: true,
+                limits: [10, 20, 30],
+                limit: 10,
+                where: getSearchParams(),
+                request: {
+                    pageName: "pageNo",
+                    limitName: "pageSize"
+                },
+                parseData: function (result) {
+                    return {
+                        code: 0,
+                        msg: "",
+                        count: result.total || 0,
+                        data: result.records || []
+                    };
+                },
+                cols: [[
+                    {field: "id", title: "ID", width: 80},
+                    {field: "roleName", title: "角色名称", minWidth: 160},
+                    {field: "roleCode", title: "角色编码", minWidth: 160},
+                    {field: "description", title: "角色说明", minWidth: 220, templet: function (row) { return PlatformUtils.renderValue(row.description); }},
+                    {field: "permissionIds", title: "权限数量", width: 100, templet: function (row) { return (row.permissionIds || []).length; }},
+                    {field: "updatedAt", title: "更新时间", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.updatedAt); }},
+                    {title: "操作", width: 160, fixed: "right", templet: function (row) { return renderActions(row); }}
+                ]]
+            });
+
+            table.on("tool(roleTable)", function (obj) {
+                if (obj.event === "edit") {
+                    openRoleDialog("编辑角色", obj.data);
+                }
+                if (obj.event === "delete") {
+                    layer.confirm("确认删除当前角色吗？", {title: "删除角色"}, function (index) {
+                        PlatformUtils.request("/api/roles/" + obj.data.id, {method: "DELETE"})
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("删除成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "删除失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function reloadTable() {
+            table.reload("roleTable", {
+                headers: PlatformUtils.authHeaders(),
+                where: getSearchParams(),
+                page: {
+                    curr: 1
+                }
+            });
+        }
+
+        function getSearchParams() {
+            return {
+                roleName: searchForm.querySelector('input[name="roleName"]').value.trim()
+            };
+        }
+
+        function renderActions(row) {
+            const actions = [];
+            if (canUpdate) {
+                actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="edit">编辑</a>');
+            }
+            if (canDelete && row.roleCode !== "SUPER_ADMIN") {
+                actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
+            }
+            return actions.join("") || '<span class="table-empty-action">--</span>';
+        }
+
+        function openRoleDialog(title, role) {
+            const isEdit = !!role;
+            const dialogWidth = Math.min(window.innerWidth - 32, 920) + "px";
+
+            layer.open({
+                type: 1,
+                title: title,
+                area: [dialogWidth, "auto"],
+                shadeClose: false,
+                content: buildRoleForm(role),
+                success: function (layero, index) {
+                    const rootElement = layero[0] || layero;
+                    const formElement = rootElement.querySelector("form");
+                    const cancelButton = rootElement.querySelector(".dialog-cancel");
+
+                    cancelButton.addEventListener("click", function () {
+                        layer.close(index);
+                    });
+
+                    form.render();
+
+                    formElement.addEventListener("submit", function (event) {
+                        event.preventDefault();
+                        const formData = new FormData(formElement);
+                        const payload = {
+                            roleName: String(formData.get("roleName") || "").trim(),
+                            roleCode: String(formData.get("roleCode") || "").trim(),
+                            description: String(formData.get("description") || "").trim(),
+                            permissionIds: Array.from(formElement.querySelectorAll('input[name="permissionIds"]:checked')).map(function (item) {
+                                return Number(item.value);
+                            })
+                        };
+
+                        if (!payload.roleName) {
+                            layer.msg("请输入角色名称");
+                            return;
+                        }
+                        if (!payload.roleCode) {
+                            layer.msg("请输入角色编码");
+                            return;
+                        }
+
+                        const requestUrl = isEdit ? "/api/roles/" + role.id : "/api/roles";
+                        const requestMethod = isEdit ? "PUT" : "POST";
+
+                        PlatformUtils.request(requestUrl, {
+                            method: requestMethod,
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg(isEdit ? "更新成功" : "新增成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "保存失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function buildRoleForm(role) {
+            const selectedPermissionIds = role && Array.isArray(role.permissionIds) ? role.permissionIds : [];
+            return '<form class="layui-form page-form">'
+                + '<div class="dialog-grid">'
+                + renderInput("角色名称", "roleName", role ? role.roleName : "", false, "请输入角色名称")
+                + renderInput("角色编码", "roleCode", role ? role.roleCode : "", role && role.roleCode === "SUPER_ADMIN", "请输入角色编码")
+                + renderInput("角色说明", "description", role ? role.description : "", false, "请输入角色说明")
+                + '</div>'
+                + '<div class="dialog-section">'
+                + '<div class="dialog-section-title">分配权限</div>'
+                + renderPermissionGroups(selectedPermissionIds, role && role.roleCode === "SUPER_ADMIN")
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn dialog-cancel">取消</button>'
+                + '<button type="submit" class="layui-btn page-btn">保存</button>'
+                + '</div>'
+                + '</form>';
+        }
+
+        function renderInput(label, name, value, readonly, placeholder) {
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<input type="text" name="' + name + '" value="' + PlatformUtils.escapeHtml(value || "") + '"'
+                + (readonly ? ' readonly' : '')
+                + ' placeholder="' + PlatformUtils.escapeHtml(placeholder) + '" autocomplete="off" class="layui-input">'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderPermissionGroups(selectedPermissionIds, disabled) {
+            const menuPermissions = permissionOptions.filter(function (item) { return item.permissionType === "MENU"; });
+            const actionPermissions = permissionOptions.filter(function (item) { return item.permissionType === "ACTION"; });
+            return '<div class="check-panel">'
+                + renderPermissionSection("菜单权限", menuPermissions, selectedPermissionIds, disabled)
+                + renderPermissionSection("操作权限", actionPermissions, selectedPermissionIds, disabled)
+                + '</div>';
+        }
+
+        function renderPermissionSection(title, permissions, selectedPermissionIds, disabled) {
+            if (!permissions.length) {
+                return '<div class="check-section"><div class="check-panel-title">' + title + '</div><div class="empty-state">暂无数据</div></div>';
+            }
+            return '<div class="check-section">'
+                + '<div class="check-panel-title">' + title + '</div>'
+                + '<div class="check-group">'
+                + permissions.map(function (permission) {
+                    const checked = selectedPermissionIds.includes(permission.id) ? ' checked' : '';
+                    const disabledAttr = disabled ? ' disabled' : '';
+                    return '<label class="check-item">'
+                        + '<input type="checkbox" name="permissionIds" value="' + permission.id + '" lay-skin="primary"' + checked + disabledAttr + '>'
+                        + '<span>' + PlatformUtils.escapeHtml(permission.permissionName) + ' <em>(' + PlatformUtils.escapeHtml(permission.permissionCode) + ')</em></span>'
+                        + '</label>';
+                }).join("")
+                + '</div>'
+                + '</div>';
+        }
+    });
+</script>
+</body>
+</html>

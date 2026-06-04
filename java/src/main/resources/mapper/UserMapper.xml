@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.UserMapper">
+
+    <resultMap id="UserResultMap" type="com.cd.entity.User">
+        <id property="id" column="id"/>
+        <result property="userName" column="user_name"/>
+        <result property="userPwd" column="user_pwd"/>
+        <result property="userHeader" column="user_header"/>
+        <result property="userPhone" column="user_phone"/>
+        <result property="userEmail" column="user_email"/>
+        <result property="userStatus" column="user_status" javaType="com.cd.entity.UserStatus"/>
+        <result property="failedAttempts" column="failed_attempts"/>
+        <result property="lockTime" column="lock_time"/>
+        <result property="deleted" column="deleted"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="lastLoginTime" column="last_login_time"/>
+    </resultMap>
+
+    <resultMap id="UserRoleRelationResultMap" type="com.cd.entity.UserRoleRelation">
+        <result property="userId" column="user_id"/>
+        <result property="roleId" column="role_id"/>
+        <result property="roleName" column="role_name"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id, user_name, user_pwd, user_header, user_phone, user_email, user_status, failed_attempts, lock_time, deleted, created_at, updated_at, last_login_time
+    </sql>
+
+    <select id="selectPage" resultMap="UserResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `user`
+        <where>
+            deleted = 0
+            <if test="userName != null and userName != ''">
+                AND user_name LIKE CONCAT('%', #{userName}, '%')
+            </if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM `user`
+        <where>
+            deleted = 0
+            <if test="userName != null and userName != ''">
+                AND user_name LIKE CONCAT('%', #{userName}, '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="selectById" resultMap="UserResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `user`
+        WHERE id = #{id}
+          AND deleted = 0
+    </select>
+
+    <select id="selectByUserName" resultMap="UserResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM `user`
+        WHERE user_name = #{userName}
+          AND deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectRoleIdsByUserId" resultType="long">
+        SELECT role_id
+        FROM user_role
+        WHERE user_id = #{userId}
+    </select>
+
+    <select id="selectRoleRelationsByUserIds" resultMap="UserRoleRelationResultMap">
+        SELECT ur.user_id, ur.role_id, r.role_name
+        FROM user_role ur
+                 INNER JOIN `role` r ON r.id = ur.role_id AND r.deleted = 0
+        WHERE ur.user_id IN
+        <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+            #{userId}
+        </foreach>
+    </select>
+
+    <insert id="insert" parameterType="com.cd.entity.User" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `user` (
+            user_name,
+            user_pwd,
+            user_header,
+            user_phone,
+            user_email,
+            user_status,
+            failed_attempts,
+            lock_time,
+            deleted,
+            last_login_time
+        ) VALUES (
+            #{userName},
+            #{userPwd},
+            #{userHeader},
+            #{userPhone},
+            #{userEmail},
+            #{userStatus},
+            #{failedAttempts},
+            #{lockTime},
+            0,
+            #{lastLoginTime}
+        )
+    </insert>
+
+    <update id="update" parameterType="com.cd.entity.User">
+        UPDATE `user`
+        <set>
+            <if test="userName != null">user_name = #{userName},</if>
+            <if test="userPwd != null and userPwd != ''">user_pwd = #{userPwd},</if>
+            <if test="userHeader != null">user_header = #{userHeader},</if>
+            <if test="userPhone != null">user_phone = #{userPhone},</if>
+            <if test="userEmail != null">user_email = #{userEmail},</if>
+            <if test="userStatus != null">user_status = #{userStatus},</if>
+            <if test="failedAttempts != null">failed_attempts = #{failedAttempts},</if>
+            lock_time = #{lockTime},
+            <if test="deleted != null">deleted = #{deleted},</if>
+            <if test="lastLoginTime != null">last_login_time = #{lastLoginTime},</if>
+        </set>
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="updateAuthState" parameterType="com.cd.entity.User">
+        UPDATE `user`
+        SET user_status = #{userStatus},
+            failed_attempts = #{failedAttempts},
+            lock_time = #{lockTime},
+            last_login_time = #{lastLoginTime}
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="clearLockState">
+        UPDATE `user`
+        SET user_status = #{userStatus},
+            failed_attempts = 0,
+            lock_time = NULL
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="unlockExpiredUsers">
+        UPDATE `user`
+        SET user_status = 'NORMAL',
+            failed_attempts = 0,
+            lock_time = NULL
+        WHERE deleted = 0
+          AND user_status = 'LOCKED'
+          AND lock_time IS NOT NULL
+          AND lock_time <![CDATA[<=]]> #{unlockBefore}
+    </update>
+
+    <update id="resetExpiredFailures">
+        UPDATE `user`
+        SET failed_attempts = 0,
+            lock_time = NULL
+        WHERE deleted = 0
+          AND user_status = 'NORMAL'
+          AND failed_attempts > 0
+          AND lock_time IS NOT NULL
+          AND lock_time <![CDATA[<=]]> #{failureBefore}
+    </update>
+
+    <update id="deleteById">
+        UPDATE `user`
+        SET deleted = 1
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <delete id="deleteUserRolesByUserId">
+        DELETE FROM user_role
+        WHERE user_id = #{userId}
+    </delete>
+
+    <insert id="insertUserRoles">
+        INSERT INTO user_role (user_id, role_id)
+        VALUES
+        <foreach collection="roleIds" item="roleId" separator=",">
+            (#{userId}, #{roleId})
+        </foreach>
+    </insert>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(1)
+        FROM `user`
+        WHERE deleted = 0
+    </select>
+
+    <select id="countByStatus" resultType="long">
+        SELECT COUNT(1)
+        FROM `user`
+        WHERE deleted = 0
+          AND user_status = #{userStatus}
+    </select>
+</mapper>

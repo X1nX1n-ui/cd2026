@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.LoginLogMapper">
+
+    <resultMap id="LoginLogResultMap" type="com.cd.entity.LoginLog">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="ipAddress" column="ip_address"/>
+        <result property="result" column="result"/>
+        <result property="message" column="message"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.cd.entity.LoginLog" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO login_log (
+            user_id,
+            user_name,
+            ip_address,
+            result,
+            message,
+            created_at
+        ) VALUES (
+            #{userId},
+            #{userName},
+            #{ipAddress},
+            #{result},
+            #{message},
+            #{createdAt}
+        )
+    </insert>
+
+    <select id="selectPage" resultMap="LoginLogResultMap">
+        SELECT id, user_id, user_name, ip_address, result, message, created_at
+        FROM login_log
+        <where>
+            <if test="userName != null and userName != ''">
+                user_name LIKE CONCAT('%', #{userName}, '%')
+            </if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM login_log
+        <where>
+            <if test="userName != null and userName != ''">
+                user_name LIKE CONCAT('%', #{userName}, '%')
+            </if>
+        </where>
+    </select>
+
+    <select id="countToday" resultType="long">
+        SELECT COUNT(1)
+        FROM login_log
+        WHERE created_at <![CDATA[>=]]> #{startTime}
+          AND created_at <![CDATA[<]]> #{endTime}
+    </select>
+
+    <select id="countTodayFailure" resultType="long">
+        SELECT COUNT(1)
+        FROM login_log
+        WHERE created_at <![CDATA[>=]]> #{startTime}
+          AND created_at <![CDATA[<]]> #{endTime}
+          AND result <![CDATA[<>]]> 'SUCCESS'
+    </select>
+</mapper>

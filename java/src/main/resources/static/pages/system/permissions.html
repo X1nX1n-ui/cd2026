@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>权限管理</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>权限管理</h1>
+                <p>维护菜单权限和操作权限，支持分页与搜索。</p>
+            </div>
+        </section>
+
+        <section class="page-filter">
+            <form class="layui-form page-filter-form" id="searchForm">
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <input type="text" name="permissionName" placeholder="请输入权限名称查询" autocomplete="off" class="layui-input">
+                    </div>
+                </div>
+                <button type="submit" class="layui-btn page-btn">查询</button>
+                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+            </form>
+            <div class="page-toolbar" id="pageToolbar"></div>
+        </section>
+
+        <section class="page-table-card">
+            <table id="permissionTable" lay-filter="permissionTable"></table>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["table", "form", "layer"], function () {
+        const table = layui.table;
+        const form = layui.form;
+        const layer = layui.layer;
+        const searchForm = document.getElementById("searchForm");
+        const resetSearch = document.getElementById("resetSearch");
+        const pageToolbar = document.getElementById("pageToolbar");
+        const canCreate = PlatformUtils.hasPermission("sys:permission:create");
+        const canUpdate = PlatformUtils.hasPermission("sys:permission:update");
+        const canDelete = PlatformUtils.hasPermission("sys:permission:delete");
+        let permissionOptions = [];
+        let permissionNameMap = {};
+
+        init();
+
+        function init() {
+            renderToolbar();
+            bindSearch();
+            renderTable();
+        }
+
+        function renderToolbar() {
+            if (!canCreate) {
+                return;
+            }
+            pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createPermissionButton">新增权限</button>';
+            document.getElementById("createPermissionButton").addEventListener("click", function () {
+                loadPermissionOptions().then(function () {
+                    openPermissionDialog("新增权限");
+                });
+            });
+        }
+
+        function bindSearch() {
+            searchForm.addEventListener("submit", function (event) {
+                event.preventDefault();
+                reloadTable();
+            });
+            resetSearch.addEventListener("click", function () {
+                searchForm.reset();
+                reloadTable();
+            });
+        }
+
+        function loadPermissionOptions() {
+            return PlatformUtils.request("/api/permissions/options")
+                .then(function (data) {
+                    permissionOptions = Array.isArray(data) ? data : [];
+                    permissionNameMap = {};
+                    permissionOptions.forEach(function (item) {
+                        permissionNameMap[item.id] = item.permissionName;
+                    });
+                })
+                .catch(function (error) {
+                    permissionOptions = [];
+                    permissionNameMap = {};
+                    layer.msg(error.message || "权限选项加载失败");
+                });
+        }
+
+        function renderTable() {
+            table.render({
+                elem: "#permissionTable",
+                id: "permissionTable",
+                url: "/api/permissions/page",
+                method: "GET",
+                headers: PlatformUtils.authHeaders(),
+                page: true,
+                limits: [10, 20, 30],
+                limit: 10,
+                where: getSearchParams(),
+                request: {
+                    pageName: "pageNo",
+                    limitName: "pageSize"
+                },
+                parseData: function (result) {
+                    return {
+                        code: 0,
+                        msg: "",
+                        count: result.total || 0,
+                        data: result.records || []
+                    };
+                },
+                cols: [[
+                    {field: "id", title: "ID", width: 80},
+                    {field: "permissionName", title: "权限名称", minWidth: 140},
+                    {field: "permissionCode", title: "权限编码", minWidth: 180},
+                    {field: "permissionType", title: "类型", width: 100},
+                    {field: "parentId", title: "上级权限", minWidth: 140, templet: function (row) { return PlatformUtils.renderValue(permissionNameMap[row.parentId] || "--"); }},
+                    {field: "routePath", title: "路由地址", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.routePath); }},
+                    {field: "sortNo", title: "排序", width: 80},
+                    {field: "visible", title: "显示", width: 80, templet: function (row) { return row.visible === 1 ? "是" : "否"; }},
+                    {title: "操作", width: 160, fixed: "right", templet: function () { return renderActions(); }}
+                ]]
+            });
+
+            table.on("tool(permissionTable)", function (obj) {
+                if (obj.event === "edit") {
+                    loadPermissionOptions().then(function () {
+                        openPermissionDialog("编辑权限", obj.data);
+                    });
+                }
+                if (obj.event === "delete") {
+                    layer.confirm("确认删除当前权限吗？", {title: "删除权限"}, function (index) {
+                        PlatformUtils.request("/api/permissions/" + obj.data.id, {method: "DELETE"})
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("删除成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "删除失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function reloadTable() {
+            table.reload("permissionTable", {
+                headers: PlatformUtils.authHeaders(),
+                where: getSearchParams(),
+                page: {
+                    curr: 1
+                }
+            });
+        }
+
+        function getSearchParams() {
+            return {
+                permissionName: searchForm.querySelector('input[name="permissionName"]').value.trim()
+            };
+        }
+
+        function renderActions() {
+            const actions = [];
+            if (canUpdate) {
+                actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="edit">编辑</a>');
+            }
+            if (canDelete) {
+                actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
+            }
+            return actions.join("") || '<span class="table-empty-action">--</span>';
+        }
+
+        function openPermissionDialog(title, permission) {
+            const isEdit = !!permission;
+            const dialogWidth = Math.min(window.innerWidth - 32, 880) + "px";
+
+            layer.open({
+                type: 1,
+                title: title,
+                area: [dialogWidth, "auto"],
+                shadeClose: false,
+                content: buildPermissionForm(permission),
+                success: function (layero, index) {
+                    const rootElement = layero[0] || layero;
+                    const formElement = rootElement.querySelector("form");
+                    const cancelButton = rootElement.querySelector(".dialog-cancel");
+                    const typeSelect = rootElement.querySelector('select[name="permissionType"]');
+                    const menuFields = rootElement.querySelectorAll("[data-menu-field]");
+
+                    cancelButton.addEventListener("click", function () {
+                        layer.close(index);
+                    });
+
+                    typeSelect.addEventListener("change", function () {
+                        syncPermissionForm(typeSelect.value, menuFields);
+                    });
+                    syncPermissionForm(typeSelect.value, menuFields);
+                    form.render();
+
+                    formElement.addEventListener("submit", function (event) {
+                        event.preventDefault();
+                        const formData = new FormData(formElement);
+                        const parentValue = String(formData.get("parentId") || "").trim();
+                        const permissionType = String(formData.get("permissionType") || "MENU");
+                        const payload = {
+                            permissionName: String(formData.get("permissionName") || "").trim(),
+                            permissionCode: String(formData.get("permissionCode") || "").trim(),
+                            permissionType: permissionType,
+                            parentId: parentValue ? Number(parentValue) : null,
+                            routePath: String(formData.get("routePath") || "").trim(),
+                            componentPath: String(formData.get("componentPath") || "").trim(),
+                            icon: String(formData.get("icon") || "").trim(),
+                            sortNo: Number(formData.get("sortNo") || 0),
+                            visible: Number(formData.get("visible") || 1),
+                            description: String(formData.get("description") || "").trim()
+                        };
+
+                        if (!payload.permissionName) {
+                            layer.msg("请输入权限名称");
+                            return;
+                        }
+                        if (!payload.permissionCode) {
+                            layer.msg("请输入权限编码");
+                            return;
+                        }
+                        if (permissionType === "ACTION") {
+                            payload.routePath = null;
+                            payload.componentPath = null;
+                            payload.icon = null;
+                            payload.visible = 0;
+                        }
+
+                        const requestUrl = isEdit ? "/api/permissions/" + permission.id : "/api/permissions";
+                        const requestMethod = isEdit ? "PUT" : "POST";
+
+                        PlatformUtils.request(requestUrl, {
+                            method: requestMethod,
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg(isEdit ? "更新成功" : "新增成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "保存失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function buildPermissionForm(permission) {
+            return '<form class="layui-form page-form">'
+                + '<div class="dialog-grid">'
+                + renderInput("权限名称", "permissionName", permission ? permission.permissionName : "", "请输入权限名称")
+                + renderInput("权限编码", "permissionCode", permission ? permission.permissionCode : "", "请输入权限编码")
+                + renderSelect("权限类型", "permissionType", permission ? permission.permissionType : "MENU", [
+                    {value: "MENU", label: "菜单权限"},
+                    {value: "ACTION", label: "操作权限"}
+                ])
+                + renderParentSelect(permission)
+                + renderInput("路由地址", "routePath", permission ? permission.routePath : "", "菜单权限可填写", true)
+                + renderInput("组件地址", "componentPath", permission ? permission.componentPath : "", "菜单权限可填写", true)
+                + renderInput("图标名称", "icon", permission ? permission.icon : "", "例如 users", true)
+                + renderInput("排序值", "sortNo", permission ? permission.sortNo : 0, "请输入排序值")
+                + renderSelect("是否显示", "visible", String(permission ? permission.visible : 1), [
+                    {value: "1", label: "显示"},
+                    {value: "0", label: "隐藏"}
+                ], false, true)
+                + '</div>'
+                + '<div class="layui-form-item">'
+                + '<label class="layui-form-label">权限说明</label>'
+                + '<div class="layui-input-block">'
+                + '<textarea name="description" placeholder="请输入权限说明" class="layui-textarea">' + PlatformUtils.escapeHtml(permission ? permission.description || "" : "") + '</textarea>'
+                + '</div>'
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn dialog-cancel">取消</button>'
+                + '<button type="submit" class="layui-btn page-btn">保存</button>'
+                + '</div>'
+                + '</form>';
+        }
+
+        function renderInput(label, name, value, placeholder, menuField) {
+            return '<div class="layui-form-item"' + (menuField ? ' data-menu-field="true"' : '') + '>'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<input type="text" name="' + name + '" value="' + PlatformUtils.escapeHtml(String(value === null || value === undefined ? "" : value)) + '" placeholder="' + PlatformUtils.escapeHtml(placeholder) + '" autocomplete="off" class="layui-input">'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderSelect(label, name, currentValue, options, disabled, menuField) {
+            return '<div class="layui-form-item"' + (menuField ? ' data-menu-field="true"' : '') + '>'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<select name="' + name + '"' + (disabled ? ' disabled' : '') + '>'
+                + options.map(function (option) {
+                    const selected = String(option.value) === String(currentValue) ? ' selected' : '';
+                    return '<option value="' + option.value + '"' + selected + '>' + option.label + '</option>';
+                }).join("")
+                + '</select>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderParentSelect(permission) {
+            const currentId = permission ? permission.id : null;
+            const currentParentId = permission ? permission.parentId : "";
+            const options = permissionOptions.filter(function (item) {
+                return item.permissionType === "MENU" && item.id !== currentId;
+            });
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">上级权限</label>'
+                + '<div class="layui-input-block">'
+                + '<select name="parentId">'
+                + '<option value="">无</option>'
+                + options.map(function (item) {
+                    const selected = String(item.id) === String(currentParentId || "") ? ' selected' : '';
+                    return '<option value="' + item.id + '"' + selected + '>' + PlatformUtils.escapeHtml(item.permissionName) + '</option>';
+                }).join("")
+                + '</select>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function syncPermissionForm(permissionType, menuFields) {
+            menuFields.forEach(function (item) {
+                item.hidden = permissionType !== "MENU";
+            });
+        }
+    });
+</script>
+</body>
+</html>

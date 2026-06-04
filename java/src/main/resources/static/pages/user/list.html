@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>用户管理</h1>
+                <p>支持分页、按用户名搜索，以及用户角色分配。</p>
+            </div>
+        </section>
+
+        <section class="page-filter">
+            <form class="layui-form page-filter-form" id="searchForm">
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <input type="text" name="userName" placeholder="请输入用户名查询" autocomplete="off" class="layui-input">
+                    </div>
+                </div>
+                <button type="submit" class="layui-btn page-btn">查询</button>
+                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+            </form>
+            <div class="page-toolbar" id="pageToolbar"></div>
+        </section>
+
+        <section class="page-table-card">
+            <table id="userTable" lay-filter="userTable"></table>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["table", "form", "layer"], function () {
+        const table = layui.table;
+        const form = layui.form;
+        const layer = layui.layer;
+        const searchForm = document.getElementById("searchForm");
+        const resetSearch = document.getElementById("resetSearch");
+        const pageToolbar = document.getElementById("pageToolbar");
+        const canCreate = PlatformUtils.hasPermission("sys:user:create");
+        const canUpdate = PlatformUtils.hasPermission("sys:user:update");
+        const canDelete = PlatformUtils.hasPermission("sys:user:delete");
+        let roleOptions = [];
+
+        init();
+
+        function init() {
+            renderToolbar();
+            bindSearch();
+            loadRoleOptions().then(function () {
+                renderTable();
+            });
+        }
+
+        function renderToolbar() {
+            if (!canCreate) {
+                pageToolbar.innerHTML = "";
+                return;
+            }
+            pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createUserButton">新增用户</button>';
+            document.getElementById("createUserButton").addEventListener("click", function () {
+                openUserDialog("新增用户");
+            });
+        }
+
+        function bindSearch() {
+            searchForm.addEventListener("submit", function (event) {
+                event.preventDefault();
+                reloadTable();
+            });
+
+            resetSearch.addEventListener("click", function () {
+                searchForm.reset();
+                reloadTable();
+            });
+        }
+
+        function loadRoleOptions() {
+            return PlatformUtils.request("/api/roles/options")
+                .then(function (data) {
+                    roleOptions = Array.isArray(data) ? data : [];
+                })
+                .catch(function (error) {
+                    layer.msg(error.message || "角色选项加载失败");
+                    roleOptions = [];
+                });
+        }
+
+        function renderTable() {
+            table.render({
+                elem: "#userTable",
+                id: "userTable",
+                url: "/api/user/page",
+                method: "GET",
+                headers: PlatformUtils.authHeaders(),
+                page: true,
+                limits: [10, 20, 30],
+                limit: 10,
+                where: getSearchParams(),
+                request: {
+                    pageName: "pageNo",
+                    limitName: "pageSize"
+                },
+                parseData: function (result) {
+                    return {
+                        code: 0,
+                        msg: "",
+                        count: result.total || 0,
+                        data: result.records || []
+                    };
+                },
+                cols: [[
+                    {field: "id", title: "ID", width: 80},
+                    {field: "userName", title: "用户名", minWidth: 140},
+                    {field: "roleNames", title: "角色", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue((row.roleNames || []).join("、")); }},
+                    {field: "userPhone", title: "手机号", minWidth: 140, templet: function (row) { return PlatformUtils.renderValue(row.userPhone); }},
+                    {field: "userEmail", title: "邮箱", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.userEmail); }},
+                    {field: "userStatus", title: "状态", width: 100, templet: function (row) { return PlatformUtils.renderStatus(row.userStatus); }},
+                    {field: "failedAttempts", title: "失败次数", width: 100, templet: function (row) { return PlatformUtils.renderValue(row.failedAttempts); }},
+                    {field: "lockTime", title: "锁定时间", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.lockTime); }},
+                    {field: "lastLoginTime", title: "最后登录", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.lastLoginTime); }},
+                    {title: "操作", width: 160, fixed: "right", templet: function (row) { return renderActions(row); }}
+                ]]
+            });
+
+            table.on("tool(userTable)", function (obj) {
+                if (obj.event === "edit") {
+                    openUserDialog("编辑用户", obj.data);
+                }
+                if (obj.event === "delete") {
+                    layer.confirm("确认删除当前用户吗？", {title: "删除用户"}, function (index) {
+                        PlatformUtils.request("/api/user/" + obj.data.id, {method: "DELETE"})
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("删除成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "删除失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function reloadTable() {
+            table.reload("userTable", {
+                headers: PlatformUtils.authHeaders(),
+                where: getSearchParams(),
+                page: {
+                    curr: 1
+                }
+            });
+        }
+
+        function getSearchParams() {
+            return {
+                userName: searchForm.querySelector('input[name="userName"]').value.trim()
+            };
+        }
+
+        function renderActions(row) {
+            const actions = [];
+            if (canUpdate) {
+                actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="edit">编辑</a>');
+            }
+            if (canDelete && row.userName !== "admin") {
+                actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
+            }
+            return actions.join("") || '<span class="table-empty-action">--</span>';
+        }
+
+        function openUserDialog(title, user) {
+            const isEdit = !!user;
+            const dialogWidth = Math.min(window.innerWidth - 32, 860) + "px";
+
+            layer.open({
+                type: 1,
+                title: title,
+                area: [dialogWidth, "auto"],
+                shadeClose: false,
+                content: buildUserForm(user),
+                success: function (layero, index) {
+                    const rootElement = layero[0] || layero;
+                    const formElement = rootElement.querySelector("form");
+                    const cancelButton = rootElement.querySelector(".dialog-cancel");
+
+                    cancelButton.addEventListener("click", function () {
+                        layer.close(index);
+                    });
+
+                    rootElement.querySelectorAll('input[name="roleIds"]').forEach(function (input) {
+                        if (user && Array.isArray(user.roleIds) && user.roleIds.includes(Number(input.value))) {
+                            input.checked = true;
+                        }
+                    });
+
+                    form.render();
+
+                    formElement.addEventListener("submit", function (event) {
+                        event.preventDefault();
+                        const formData = new FormData(formElement);
+                        const payload = {
+                            userName: String(formData.get("userName") || "").trim(),
+                            userPwd: String(formData.get("userPwd") || "").trim(),
+                            userPhone: String(formData.get("userPhone") || "").trim(),
+                            userEmail: String(formData.get("userEmail") || "").trim(),
+                            userHeader: String(formData.get("userHeader") || "").trim(),
+                            userStatus: formData.get("userStatus"),
+                            roleIds: Array.from(formElement.querySelectorAll('input[name="roleIds"]:checked')).map(function (item) {
+                                return Number(item.value);
+                            })
+                        };
+
+                        if (!payload.userName) {
+                            layer.msg("请输入用户名");
+                            return;
+                        }
+                        if (!isEdit && !payload.userPwd) {
+                            layer.msg("新增用户时必须填写密码");
+                            return;
+                        }
+                        if (!payload.userPwd) {
+                            delete payload.userPwd;
+                        }
+
+                        const requestUrl = isEdit ? "/api/user/" + user.id : "/api/user";
+                        const requestMethod = isEdit ? "PUT" : "POST";
+
+                        PlatformUtils.request(requestUrl, {
+                            method: requestMethod,
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg(isEdit ? "更新成功" : "新增成功");
+                                reloadTable();
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "保存失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function buildUserForm(user) {
+            return '<form class="layui-form page-form">'
+                + '<div class="dialog-grid">'
+                + renderInput("用户名", "userName", user ? user.userName : "", user && user.userName === "admin")
+                + renderInput("密码", "userPwd", "", false, user ? "留空表示不修改" : "新增用户时必填", "password")
+                + renderInput("手机号", "userPhone", user ? user.userPhone : "")
+                + renderInput("邮箱", "userEmail", user ? user.userEmail : "")
+                + renderInput("头像地址", "userHeader", user ? user.userHeader : "")
+                + renderSelect("用户状态", "userStatus", user ? user.userStatus : "NORMAL", [
+                    {value: "NORMAL", label: "正常"},
+                    {value: "DISABLED", label: "禁用"},
+                    {value: "LOCKED", label: "锁定"}
+                ], user && user.userName === "admin")
+                + '</div>'
+                + '<div class="dialog-section">'
+                + '<div class="dialog-section-title">分配角色</div>'
+                + renderRoleCheckboxes(user ? user.roleIds : [])
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn dialog-cancel">取消</button>'
+                + '<button type="submit" class="layui-btn page-btn">保存</button>'
+                + '</div>'
+                + '</form>';
+        }
+
+        function renderInput(label, name, value, readonly, placeholder, type) {
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<input type="' + (type || "text") + '" name="' + name + '" value="' + PlatformUtils.escapeHtml(value || "") + '"'
+                + (readonly ? ' readonly' : '')
+                + ' placeholder="' + PlatformUtils.escapeHtml(placeholder || ("请输入" + label)) + '" autocomplete="off" class="layui-input">'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderSelect(label, name, currentValue, options, disabled) {
+            return '<div class="layui-form-item">'
+                + '<label class="layui-form-label">' + label + '</label>'
+                + '<div class="layui-input-block">'
+                + '<select name="' + name + '"' + (disabled ? ' disabled' : '') + '>'
+                + options.map(function (option) {
+                    const selected = option.value === currentValue ? ' selected' : '';
+                    return '<option value="' + option.value + '"' + selected + '>' + option.label + '</option>';
+                }).join("")
+                + '</select>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderRoleCheckboxes(selectedRoleIds) {
+            if (!roleOptions.length) {
+                return '<div class="empty-state">暂无可分配角色</div>';
+            }
+            return '<div class="check-group">'
+                + roleOptions.map(function (role) {
+                    const checked = selectedRoleIds && selectedRoleIds.includes(role.id) ? ' checked' : '';
+                    const disabled = role.roleCode === "SUPER_ADMIN" ? ' disabled' : '';
+                    return '<label class="check-item">'
+                        + '<input type="checkbox" name="roleIds" value="' + role.id + '" lay-skin="primary"' + checked + disabled + '>'
+                        + '<span>' + PlatformUtils.escapeHtml(role.roleName) + '</span>'
+                        + '</label>';
+                }).join("")
+                + '</div>';
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.TestMapper">
+
+    <resultMap id="TestResultMap" type="com.cd.entity.Test">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+        <result property="remark" column="remark"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="BaseColumnList">
+        id, name, remark, created_at, updated_at
+    </sql>
+
+    <select id="selectList" resultMap="TestResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM test
+        ORDER BY id DESC
+    </select>
+
+    <select id="selectById" resultMap="TestResultMap">
+        SELECT
+        <include refid="BaseColumnList"/>
+        FROM test
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.cd.entity.Test" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO test (name, remark)
+        VALUES (#{name}, #{remark})
+    </insert>
+
+    <update id="update" parameterType="com.cd.entity.Test">
+        UPDATE test
+        SET
+            name = #{name},
+            remark = #{remark}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM test
+        WHERE id = #{id}
+    </delete>
+</mapper>

@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.HostMapper">
+
+    <resultMap id="HostResultMap" type="com.cd.entity.Host">
+        <id property="id" column="id"/>
+        <result property="hostname" column="hostname"/>
+        <result property="ipAddress" column="ip_address"/>
+        <result property="macAddress" column="mac_address"/>
+        <result property="cpuArchitecture" column="cpu_architecture"/>
+        <result property="cpuName" column="cpu_name"/>
+        <result property="logicalCores" column="logical_cores"/>
+        <result property="memoryAvailable" column="memory_available"/>
+        <result property="memoryTotal" column="memory_total"/>
+        <result property="osDetail" column="os_detail"/>
+        <result property="osName" column="os_name"/>
+        <result property="osType" column="os_type"/>
+        <result property="osVersion" column="os_version"/>
+        <result property="status" column="status"/>
+        <result property="lastSeenAt" column="last_seen_at"/>
+        <result property="sourceQueue" column="source_queue"/>
+        <result property="rawPayload" column="raw_payload"/>
+        <result property="deleted" column="deleted"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="BaseColumns">
+        id, hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
+        memory_available, memory_total, os_detail, os_name, os_type, os_version, status,
+        last_seen_at, source_queue, raw_payload, deleted, created_at, updated_at
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM `hosts`
+        WHERE deleted = 0
+        <if test="keyword != null and keyword != ''">
+            AND (
+                hostname LIKE CONCAT('%', #{keyword}, '%')
+                OR ip_address LIKE CONCAT('%', #{keyword}, '%')
+                OR mac_address LIKE CONCAT('%', #{keyword}, '%')
+                OR os_name LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <select id="selectPage" resultMap="HostResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `hosts`
+        WHERE deleted = 0
+        <if test="keyword != null and keyword != ''">
+            AND (
+                hostname LIKE CONCAT('%', #{keyword}, '%')
+                OR ip_address LIKE CONCAT('%', #{keyword}, '%')
+                OR mac_address LIKE CONCAT('%', #{keyword}, '%')
+                OR os_name LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="status != null and status != ''">
+            AND status = #{status}
+        </if>
+        ORDER BY updated_at DESC, id DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="selectById" resultMap="HostResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `hosts`
+        WHERE id = #{id}
+          AND deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectByMacAddress" resultMap="HostResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `hosts`
+        WHERE mac_address = #{macAddress}
+          AND deleted = 0
+        LIMIT 1
+    </select>
+
+    <update id="refreshStatusesByUpdatedAt">
+        UPDATE `hosts`
+        SET status = CASE
+            WHEN TIMESTAMPDIFF(SECOND, updated_at, CURRENT_TIMESTAMP) > 4 THEN '0'
+            ELSE '1'
+        END
+        WHERE deleted = 0
+    </update>
+
+    <insert id="insert" parameterType="com.cd.entity.Host" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `hosts` (
+            hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
+            memory_available, memory_total, os_detail, os_name, os_type, os_version,
+            status, last_seen_at, source_queue, raw_payload, deleted
+        ) VALUES (
+            #{hostname}, #{ipAddress}, #{macAddress}, #{cpuArchitecture}, #{cpuName}, #{logicalCores},
+            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion},
+            #{status}, #{lastSeenAt}, #{sourceQueue}, #{rawPayload}, 0
+        )
+    </insert>
+
+    <update id="update" parameterType="com.cd.entity.Host">
+        UPDATE `hosts`
+        SET hostname = #{hostname},
+            ip_address = #{ipAddress},
+            mac_address = #{macAddress},
+            cpu_architecture = #{cpuArchitecture},
+            cpu_name = #{cpuName},
+            logical_cores = #{logicalCores},
+            memory_available = #{memoryAvailable},
+            memory_total = #{memoryTotal},
+            os_detail = #{osDetail},
+            os_name = #{osName},
+            os_type = #{osType},
+            os_version = #{osVersion},
+            status = #{status},
+            last_seen_at = #{lastSeenAt},
+            source_queue = #{sourceQueue},
+            raw_payload = #{rawPayload},
+            deleted = 0
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <insert id="upsertByMacAddress" parameterType="com.cd.entity.Host">
+        INSERT INTO `hosts` (
+            hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
+            memory_available, memory_total, os_detail, os_name, os_type, os_version,
+            status, last_seen_at, source_queue, raw_payload, deleted
+        ) VALUES (
+            #{hostname}, #{ipAddress}, #{macAddress}, #{cpuArchitecture}, #{cpuName}, #{logicalCores},
+            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion},
+            #{status}, #{lastSeenAt}, #{sourceQueue}, #{rawPayload}, 0
+        )
+        ON DUPLICATE KEY UPDATE
+            hostname = VALUES(hostname),
+            ip_address = VALUES(ip_address),
+            cpu_architecture = VALUES(cpu_architecture),
+            cpu_name = VALUES(cpu_name),
+            logical_cores = VALUES(logical_cores),
+            memory_available = VALUES(memory_available),
+            memory_total = VALUES(memory_total),
+            os_detail = VALUES(os_detail),
+            os_name = VALUES(os_name),
+            os_type = VALUES(os_type),
+            os_version = VALUES(os_version),
+            status = VALUES(status),
+            last_seen_at = VALUES(last_seen_at),
+            source_queue = VALUES(source_queue),
+            raw_payload = VALUES(raw_payload),
+            deleted = 0
+    </insert>
+
+    <update id="updateStatusAndUpdatedAtByMacAddress">
+        UPDATE `hosts`
+        SET status = #{status},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE mac_address = #{macAddress}
+          AND deleted = 0
+    </update>
+
+    <update id="deleteById">
+        UPDATE `hosts`
+        SET deleted = 1
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+</mapper>

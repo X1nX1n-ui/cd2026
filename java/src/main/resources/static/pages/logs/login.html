@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录日志</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>登录日志</h1>
+                <p>记录登录成功、失败、禁用与锁定场景，支持分页与用户名搜索。</p>
+            </div>
+        </section>
+
+        <section class="page-filter">
+            <form class="layui-form page-filter-form" id="searchForm">
+                <div class="layui-inline">
+                    <div class="layui-input-inline">
+                        <input type="text" name="userName" placeholder="请输入用户名查询" autocomplete="off" class="layui-input">
+                    </div>
+                </div>
+                <button type="submit" class="layui-btn page-btn">查询</button>
+                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+            </form>
+        </section>
+
+        <section class="page-table-card">
+            <table id="loginLogTable"></table>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["table"], function () {
+        const table = layui.table;
+        const searchForm = document.getElementById("searchForm");
+        const resetSearch = document.getElementById("resetSearch");
+
+        renderTable();
+
+        searchForm.addEventListener("submit", function (event) {
+            event.preventDefault();
+            reloadTable();
+        });
+
+        resetSearch.addEventListener("click", function () {
+            searchForm.reset();
+            reloadTable();
+        });
+
+        function renderTable() {
+            table.render({
+                elem: "#loginLogTable",
+                id: "loginLogTable",
+                url: "/api/logs/login",
+                method: "GET",
+                headers: PlatformUtils.authHeaders(),
+                page: true,
+                limits: [10, 20, 30],
+                limit: 10,
+                where: getSearchParams(),
+                request: {
+                    pageName: "pageNo",
+                    limitName: "pageSize"
+                },
+                parseData: function (result) {
+                    return {
+                        code: 0,
+                        msg: "",
+                        count: result.total || 0,
+                        data: result.records || []
+                    };
+                },
+                cols: [[
+                    {field: "id", title: "ID", width: 80},
+                    {field: "userName", title: "用户名", minWidth: 140},
+                    {field: "ipAddress", title: "IP 地址", minWidth: 160, templet: function (row) { return PlatformUtils.renderValue(row.ipAddress); }},
+                    {field: "result", title: "结果", width: 100, templet: function (row) { return PlatformUtils.escapeHtml(PlatformUtils.renderLoginResult(row.result)); }},
+                    {field: "message", title: "说明", minWidth: 220, templet: function (row) { return PlatformUtils.renderValue(row.message); }},
+                    {field: "createdAt", title: "记录时间", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.createdAt); }}
+                ]]
+            });
+        }
+
+        function reloadTable() {
+            table.reload("loginLogTable", {
+                headers: PlatformUtils.authHeaders(),
+                where: getSearchParams(),
+                page: {
+                    curr: 1
+                }
+            });
+        }
+
+        function getSearchParams() {
+            return {
+                userName: searchForm.querySelector('input[name="userName"]').value.trim()
+            };
+        }
+    });
+</script>
+</body>
+</html>

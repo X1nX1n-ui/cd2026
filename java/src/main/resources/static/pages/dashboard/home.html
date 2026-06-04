@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台主页</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>后台主页</h1>
+                <p>展示用户状态、登录情况与账号风险的核心统计信息。</p>
+            </div>
+            <div class="heading-meta" id="refreshTime">数据更新时间 --</div>
+        </section>
+
+        <section class="metric-grid" id="summaryCards"></section>
+
+        <section class="content-grid">
+            <article class="panel-block">
+                <div class="panel-block-head">
+                    <h3>账号状态概览</h3>
+                    <span>关注正常、锁定与禁用账号</span>
+                </div>
+                <div class="panel-block-body">
+                    <div class="info-list" id="statusOverview"></div>
+                </div>
+            </article>
+
+            <article class="panel-block">
+                <div class="panel-block-head">
+                    <h3>今日登录提示</h3>
+                    <span>基于当前登录日志</span>
+                </div>
+                <div class="panel-block-body">
+                    <div class="event-list">
+                        <div class="event-item">
+                            <div class="event-meta"><span class="tag">成功</span></div>
+                            <div class="event-text">成功登录数量可帮助快速判断平台活跃度与使用趋势。</div>
+                        </div>
+                        <div class="event-item">
+                            <div class="event-meta"><span class="tag">失败</span></div>
+                            <div class="event-text">失败登录数量异常升高时，建议联动查看登录日志和锁定策略。</div>
+                        </div>
+                        <div class="event-item">
+                            <div class="event-meta"><span class="tag">状态</span></div>
+                            <div class="event-text">账号状态由正常、禁用、锁定三类组成，可作为后续权限管控基础。</div>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </section>
+    </div>
+</div>
+
+<script src="/js/common.js"></script>
+<script>
+    PlatformUtils.request("/api/dashboard/summary").then(function (data) {
+        document.getElementById("refreshTime").textContent = "数据更新时间 " + PlatformUtils.formatDateTime(new Date().toISOString());
+        document.getElementById("summaryCards").innerHTML = [
+            createCard("用户总数", data.totalUsers, "当前平台纳管账号总量"),
+            createCard("正常账号", data.normalUsers, "可正常登录的账号数量"),
+            createCard("锁定账号", data.lockedUsers, "命中锁定策略的账号数量"),
+            createCard("禁用账号", data.disabledUsers, "被人工禁用的账号数量"),
+            createCard("今日登录次数", data.todayLoginCount, "包含成功和失败的登录尝试"),
+            createCard("今日失败次数", data.todayFailedLoginCount, "重点关注异常登录行为")
+        ].join("");
+
+        document.getElementById("statusOverview").innerHTML = [
+            createInfo("正常账号", data.normalUsers + " 个"),
+            createInfo("锁定账号", data.lockedUsers + " 个"),
+            createInfo("禁用账号", data.disabledUsers + " 个"),
+            createInfo("今日登录", data.todayLoginCount + " 次"),
+            createInfo("今日失败", data.todayFailedLoginCount + " 次")
+        ].join("");
+    });
+
+    function createCard(label, value, note) {
+        return '<article class="metric-item"><div class="metric-label">' + label + '</div><div class="metric-value">' + value + '</div><div class="metric-note">' + note + '</div></article>';
+    }
+
+    function createInfo(label, value) {
+        return '<div class="info-item"><span class="metric-label">' + label + '</span><strong>' + value + '</strong></div>';
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人信息</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section">
+        <section class="page-heading">
+            <div>
+                <h1>个人信息</h1>
+                <p>展示当前登录用户的完整信息，不包含密码。</p>
+            </div>
+        </section>
+
+        <section class="profile-layout">
+            <article class="profile-card profile-avatar-card">
+                <h2>头像信息</h2>
+                <div class="avatar-preview-wrap">
+                    <img id="avatarPreview" class="avatar-preview" src="/images/default-avatar.svg" alt="用户头像">
+                </div>
+                <div class="avatar-meta" id="avatarName">当前未设置头像</div>
+                <div class="avatar-actions">
+                    <input type="file" id="avatarFile" class="avatar-file-input" accept=".jpg,.jpeg,.png,.gif,.webp,image/*">
+                    <button type="button" class="layui-btn page-secondary-btn" id="selectAvatarButton">选择图片</button>
+                    <button type="button" class="layui-btn page-btn" id="uploadAvatarButton">上传头像</button>
+                </div>
+                <p class="avatar-tip">支持 jpg、jpeg、png、gif、webp，大小不超过 2MB。</p>
+            </article>
+
+            <div class="profile-grid" id="profileContainer"></div>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["layer"], function () {
+        const layer = layui.layer;
+        const avatarFileInput = document.getElementById("avatarFile");
+        const avatarPreview = document.getElementById("avatarPreview");
+        const avatarName = document.getElementById("avatarName");
+        const selectAvatarButton = document.getElementById("selectAvatarButton");
+        const uploadAvatarButton = document.getElementById("uploadAvatarButton");
+        let currentUser = null;
+        let selectedFile = null;
+
+        loadCurrentUser();
+
+        selectAvatarButton.addEventListener("click", function () {
+            avatarFileInput.click();
+        });
+
+        avatarFileInput.addEventListener("change", function () {
+            const file = avatarFileInput.files[0];
+            selectedFile = file || null;
+            if (!file) {
+                renderAvatar(currentUser ? currentUser.userHeader : "");
+                avatarName.textContent = currentUser && currentUser.userHeader ? "当前头像已保存" : "当前未设置头像";
+                return;
+            }
+            avatarName.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                avatarPreview.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        uploadAvatarButton.addEventListener("click", function () {
+            if (!selectedFile) {
+                layer.msg("请先选择头像图片");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+
+            fetch("/api/user/current/avatar", {
+                method: "POST",
+                headers: PlatformUtils.authHeaders(),
+                body: formData
+            })
+                .then(async function (response) {
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.message || "头像上传失败");
+                    }
+                    layer.msg("头像上传成功");
+                    selectedFile = null;
+                    avatarFileInput.value = "";
+                    currentUser = result;
+                    renderProfile(result);
+                    return PlatformUtils.request("/api/auth/me");
+                })
+                .then(function (authResult) {
+                    if (authResult.success && authResult.user) {
+                        PlatformUtils.setCurrentUser(authResult.user);
+                    }
+                })
+                .catch(function (error) {
+                    layer.msg(error.message || "头像上传失败");
+                });
+        });
+
+        function loadCurrentUser() {
+            PlatformUtils.request("/api/user/current")
+                .then(function (data) {
+                    currentUser = data;
+                    renderProfile(data);
+                })
+                .catch(function (error) {
+                    layer.msg(error.message || "个人信息加载失败");
+                });
+        }
+
+        function renderProfile(data) {
+            renderAvatar(data.userHeader);
+            avatarName.textContent = data.userHeader ? "当前头像已保存" : "当前未设置头像";
+            document.getElementById("profileContainer").innerHTML = [
+                renderProfileCard("基础信息", [
+                    ["用户名", data.userName],
+                    ["手机号", data.userPhone],
+                    ["邮箱", data.userEmail],
+                    ["角色", Array.isArray(data.roleNames) && data.roleNames.length ? data.roleNames.join("、") : "--"],
+                    ["头像地址", data.userHeader]
+                ]),
+                renderProfileCard("账号状态", [
+                    ["用户状态", PlatformUtils.renderStatus(data.userStatus)],
+                    ["失败次数", data.failedAttempts],
+                    ["锁定时间", PlatformUtils.formatDateTime(data.lockTime)],
+                    ["最后登录", PlatformUtils.formatDateTime(data.lastLoginTime)],
+                    ["创建时间", PlatformUtils.formatDateTime(data.createdAt)],
+                    ["更新时间", PlatformUtils.formatDateTime(data.updatedAt)]
+                ])
+            ].join("");
+        }
+
+        function renderAvatar(avatarUrl) {
+            avatarPreview.src = avatarUrl || "/images/default-avatar.svg";
+        }
+
+        function renderProfileCard(title, items) {
+            return '<section class="profile-card"><h2>' + title + '</h2>' + items.map(function (item) {
+                return '<div class="profile-item"><span>' + item[0] + '</span><strong>' + PlatformUtils.renderValue(item[1]) + '</strong></div>';
+            }).join("") + '</section>';
+        }
+    });
+</script>
+</body>
+</html>
