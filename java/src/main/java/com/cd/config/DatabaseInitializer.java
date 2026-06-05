@@ -2,13 +2,18 @@ package com.cd.config;
 
 import com.cd.entity.PermissionType;
 import com.cd.entity.UserStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration
 public class DatabaseInitializer {
+
+    private static final Logger log = LoggerFactory.getLogger(DatabaseInitializer.class);
 
     private static final String DEFAULT_ADMIN_USER_NAME = "admin";
     private static final String DEFAULT_ADMIN_PASSWORD = "4297f44b13955235245b2497399d7a93";
@@ -17,18 +22,32 @@ public class DatabaseInitializer {
     private static final String ANALYST_ROLE_CODE = "ANALYST";
     private static final String AUDITOR_ROLE_CODE = "AUDITOR";
 
+    @Value("${app.database.initialize-on-startup:true}")
+    private boolean initializeOnStartup;
+
     @Bean
     public ApplicationRunner applicationRunner(JdbcTemplate jdbcTemplate) {
         return args -> {
-            ensureBaseTables(jdbcTemplate);
-            ensureUserColumns(jdbcTemplate);
-            normalizeExistingUsers(jdbcTemplate);
-            ensureAdminUser(jdbcTemplate);
-            initializePermissions(jdbcTemplate);
-            initializeRoles(jdbcTemplate);
-            initializeRolePermissions(jdbcTemplate);
-            initializeUserRoles(jdbcTemplate);
-            initializeTestUsers(jdbcTemplate);
+            if (!initializeOnStartup) {
+                log.info("Database initialization on startup is disabled.");
+                return;
+            }
+
+            try {
+                ensureBaseTables(jdbcTemplate);
+                ensureUserColumns(jdbcTemplate);
+                normalizeExistingUsers(jdbcTemplate);
+                ensureAdminUser(jdbcTemplate);
+                initializePermissions(jdbcTemplate);
+                initializeRoles(jdbcTemplate);
+                initializeRolePermissions(jdbcTemplate);
+                initializeUserRoles(jdbcTemplate);
+                initializeTestUsers(jdbcTemplate);
+                log.info("Database initialization completed successfully.");
+            } catch (Exception ex) {
+                log.warn("Database initialization skipped because the database is unavailable: {}", ex.getMessage());
+                log.debug("Database initialization failure details", ex);
+            }
         };
     }
 
@@ -142,6 +161,64 @@ public class DatabaseInitializer {
                     KEY idx_hosts_last_seen_at (last_seen_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `accounts` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    accounts LONGTEXT NULL,
+                    shadow_accounts LONGTEXT NULL,
+                    account_count INT NOT NULL DEFAULT 0,
+                    shadow_account_count INT NOT NULL DEFAULT 0,
+                    raw_payload LONGTEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_accounts_mac_address (mac_address),
+                    KEY idx_accounts_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `services` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    services LONGTEXT NULL,
+                    service_count INT NOT NULL DEFAULT 0,
+                    raw_payload LONGTEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_services_mac_address (mac_address),
+                    KEY idx_services_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `processes` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    processes LONGTEXT NULL,
+                    process_count INT NOT NULL DEFAULT 0,
+                    raw_payload LONGTEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_processes_mac_address (mac_address),
+                    KEY idx_processes_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `apps` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    apps LONGTEXT NULL,
+                    app_count INT NOT NULL DEFAULT 0,
+                    raw_payload LONGTEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_apps_mac_address (mac_address),
+                    KEY idx_apps_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     private void ensureUserColumns(JdbcTemplate jdbcTemplate) {
@@ -158,6 +235,7 @@ public class DatabaseInitializer {
                     END
                     """);
         }
+
     }
 
     private void normalizeExistingUsers(JdbcTemplate jdbcTemplate) {
@@ -208,6 +286,7 @@ public class DatabaseInitializer {
         upsertPermission(jdbcTemplate, "重点资产", "asset:key-assets:view", PermissionType.MENU, assetRootId, "/pages/assets/key-assets.html", "/pages/assets/key-assets.html", "database", 31, 1, "重点资产页面");
         upsertPermission(jdbcTemplate, "暴露面扫描", "asset:exposure-scan:view", PermissionType.MENU, assetRootId, "/pages/assets/exposure-scan.html", "/pages/assets/exposure-scan.html", "scan-search", 32, 1, "暴露面扫描页面");
         Long hostManageId = upsertPermission(jdbcTemplate, "主机管理", "asset:host:view", PermissionType.MENU, assetRootId, "/pages/assets/hosts.html", "/pages/assets/hosts.html", "monitor-smartphone", 33, 1, "主机管理页面");
+        upsertPermission(jdbcTemplate, "资产详情", "asset:detail:view", PermissionType.MENU, assetRootId, "/pages/assets/asset-detail.html", "/pages/assets/asset-detail.html", "folder-search-2", 34, 0, "资产详情页面");
 
         Long systemRootId = upsertPermission(jdbcTemplate, "系统管理", "system", PermissionType.MENU, null, null, null, "settings", 40, 1, "系统管理菜单");
         Long userListId = upsertPermission(jdbcTemplate, "用户管理", "sys:user:view", PermissionType.MENU, systemRootId, "/pages/user/list.html", "/pages/user/list.html", "users", 41, 1, "用户管理页面");
@@ -254,6 +333,7 @@ public class DatabaseInitializer {
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:key-assets:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:exposure-scan:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:host:view"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:detail:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "user:profile:view"));
 
         ensureRolePermission(jdbcTemplate, auditorRoleId, getPermissionId(jdbcTemplate, "dashboard:view"));
@@ -380,4 +460,5 @@ public class DatabaseInitializer {
                 """, Integer.class, columnName);
         return count != null && count > 0;
     }
+
 }

@@ -69,6 +69,31 @@ window.PlatformUtils = (function () {
         return readJson(localStorage, rememberedLoginKey) || {};
     }
 
+    function readSessionCache(key, maxAgeMs) {
+        if (!key) {
+            return null;
+        }
+        const payload = readJson(sessionStorage, key);
+        if (!payload || typeof payload !== "object") {
+            return null;
+        }
+        if (maxAgeMs && payload.cachedAt && Date.now() - payload.cachedAt > maxAgeMs) {
+            sessionStorage.removeItem(key);
+            return null;
+        }
+        return payload.data;
+    }
+
+    function writeSessionCache(key, data) {
+        if (!key) {
+            return;
+        }
+        writeJson(sessionStorage, key, {
+            cachedAt: Date.now(),
+            data: data
+        });
+    }
+
     function authHeaders(extraHeaders) {
         const headers = Object.assign({}, extraHeaders || {});
         const token = getToken();
@@ -92,8 +117,21 @@ window.PlatformUtils = (function () {
         requestOptions.headers = authHeaders(requestOptions.headers);
 
         return fetch(url, requestOptions).then(async function (response) {
-            const text = await response.text();
-            const data = text ? JSON.parse(text) : {};
+            const contentType = (response.headers.get("content-type") || "").toLowerCase();
+            let data = {};
+
+            if (response.status !== 204) {
+                if (contentType.indexOf("application/json") >= 0) {
+                    try {
+                        data = await response.json();
+                    } catch (error) {
+                        data = {};
+                    }
+                } else {
+                    const text = await response.text();
+                    data = text ? JSON.parse(text) : {};
+                }
+            }
 
             if (response.status === 401) {
                 redirectToLogin();
@@ -177,6 +215,8 @@ window.PlatformUtils = (function () {
         setCurrentUser: setCurrentUser,
         saveRememberedLogin: saveRememberedLogin,
         getRememberedLogin: getRememberedLogin,
+        readSessionCache: readSessionCache,
+        writeSessionCache: writeSessionCache,
         hasPermission: hasPermission,
         formatDateTime: formatDateTime,
         renderStatus: renderStatus,

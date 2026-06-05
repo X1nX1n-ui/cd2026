@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -11,34 +11,56 @@
 <div class="login-shell">
     <div class="login-panel">
         <section class="login-hero">
-            <div class="eyebrow">THREAT AWARENESS PLATFORM</div>
             <h1 class="login-title login-title-strong">威胁感知平台</h1>
             <div class="login-tags">
                 <span class="login-tag">威胁监测</span>
-                <span class="login-tag">资产管理</span>
-                <span class="login-tag">权限控制</span>
+                <span class="login-tag">资产管控</span>
+                <span class="login-tag">访问治理</span>
             </div>
         </section>
 
         <section class="login-form-panel">
-            <h2 class="panel-title">系统登录</h2>
+            <h2 class="panel-title">立即体验</h2>
             <form class="layui-form tech-form" id="loginForm">
                 <div class="layui-form-item">
                     <div class="layui-input-block">
-                        <input type="text" name="userName" required lay-verify="required" placeholder="请输入用户名" autocomplete="username" class="layui-input">
+                        <input type="text" name="userName" required lay-verify="required" placeholder="请输入操作员标识" autocomplete="username" class="layui-input">
                     </div>
                 </div>
                 <div class="layui-form-item">
                     <div class="layui-input-block">
-                        <input type="password" name="password" required lay-verify="required" placeholder="请输入密码" autocomplete="current-password" class="layui-input">
+                        <input type="password" name="password" required lay-verify="required" placeholder="请输入安全访问密钥" autocomplete="current-password" class="layui-input">
+                    </div>
+                </div>
+                <div class="layui-form-item">
+                    <div class="layui-input-block">
+                        <div class="login-captcha-panel" id="captchaPanel">
+                            <div class="login-captcha-head">
+                                <span>滑块验证</span>
+                                <button type="button" class="text-link-button" id="refreshCaptchaButton">刷新验证</button>
+                            </div>
+                            <div class="puzzle-captcha" id="puzzleCaptcha">
+                                <canvas class="puzzle-captcha-bg" id="captchaCanvas" width="344" height="172"></canvas>
+                                <canvas class="puzzle-captcha-piece" id="captchaPieceCanvas" width="344" height="172"></canvas>
+                                <div class="puzzle-captcha-mask" id="captchaMask"></div>
+                            </div>
+                            <div class="puzzle-slider" id="captchaSlider">
+                                <div class="puzzle-slider-track" id="captchaTrack"></div>
+                                <button type="button" class="puzzle-slider-thumb" id="captchaThumb" aria-label="拖动完成验证">
+                                    <span></span>
+                                </button>
+                                <div class="puzzle-slider-text" id="captchaHint">按住滑块，拖动拼图完成验证</div>
+                            </div>
+                            <div class="puzzle-captcha-status" id="captchaStatus">等待验证</div>
+                        </div>
                     </div>
                 </div>
                 <div class="layui-form-item login-form-meta">
-                    <input type="checkbox" name="rememberMe" title="记住用户名" lay-skin="primary" checked>
+                    <input type="checkbox" name="rememberMe" title="记住我" lay-skin="primary" checked>
                 </div>
                 <div class="layui-form-item">
                     <div class="layui-input-block">
-                        <button class="layui-btn tech-btn" lay-submit lay-filter="loginSubmit">登录</button>
+                        <button class="layui-btn tech-btn" lay-submit lay-filter="loginSubmit">登录系统</button>
                     </div>
                 </div>
             </form>
@@ -55,6 +77,17 @@
         const remembered = PlatformUtils.getRememberedLogin();
         const usernameInput = document.querySelector('input[name="userName"]');
         const rememberInput = document.querySelector('input[name="rememberMe"]');
+        const captcha = createPuzzleCaptcha({
+            canvas: document.getElementById("captchaCanvas"),
+            pieceCanvas: document.getElementById("captchaPieceCanvas"),
+            mask: document.getElementById("captchaMask"),
+            slider: document.getElementById("captchaSlider"),
+            track: document.getElementById("captchaTrack"),
+            thumb: document.getElementById("captchaThumb"),
+            hint: document.getElementById("captchaHint"),
+            status: document.getElementById("captchaStatus"),
+            refreshButton: document.getElementById("refreshCaptchaButton")
+        });
 
         if (remembered.userName) {
             usernameInput.value = remembered.userName;
@@ -75,6 +108,11 @@
             }
             if (!password) {
                 layer.msg("请输入密码");
+                return false;
+            }
+            if (!captcha.isVerified()) {
+                layer.msg("请先完成滑块验证");
+                captcha.shake();
                 return false;
             }
 
@@ -105,6 +143,7 @@
                     });
                 })
                 .catch(function (error) {
+                    captcha.reset();
                     PlatformUtils.saveRememberedLogin({
                         userName: userName,
                         rememberMe: rememberMe,
@@ -114,7 +153,240 @@
                 });
             return false;
         });
+
+        function createPuzzleCaptcha(elements) {
+            const width = elements.canvas.width;
+            const height = elements.canvas.height;
+            const pieceSize = 52;
+            const pieceRadius = 10;
+            const tolerance = 6;
+            const bgCtx = elements.canvas.getContext("2d");
+            const pieceCtx = elements.pieceCanvas.getContext("2d");
+            const sourceCanvas = document.createElement("canvas");
+            sourceCanvas.width = width;
+            sourceCanvas.height = height;
+            const sourceCtx = sourceCanvas.getContext("2d");
+            const state = {
+                originX: 0,
+                originY: 0,
+                targetOffset: 0,
+                targetDisplayOffset: 0,
+                currentPuzzleOffset: 0,
+                currentSliderOffset: 0,
+                maxPuzzleOffset: 0,
+                maxSliderOffset: 0,
+                verified: false,
+                dragging: false,
+                startX: 0,
+                startSliderOffset: 0
+            };
+
+            function randomRange(min, max) {
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+
+            function drawShape(ctx, x, y) {
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + pieceSize * 0.28, y);
+                ctx.arc(x + pieceSize * 0.5, y, pieceRadius, Math.PI, 0, true);
+                ctx.lineTo(x + pieceSize, y);
+                ctx.lineTo(x + pieceSize, y + pieceSize * 0.3);
+                ctx.arc(x + pieceSize, y + pieceSize * 0.5, pieceRadius, -Math.PI / 2, Math.PI / 2, false);
+                ctx.lineTo(x + pieceSize, y + pieceSize);
+                ctx.lineTo(x + pieceSize * 0.7, y + pieceSize);
+                ctx.arc(x + pieceSize * 0.5, y + pieceSize, pieceRadius, 0, Math.PI, false);
+                ctx.lineTo(x, y + pieceSize);
+                ctx.lineTo(x, y + pieceSize * 0.72);
+                ctx.arc(x, y + pieceSize * 0.5, pieceRadius, Math.PI / 2, -Math.PI / 2, true);
+                ctx.closePath();
+            }
+
+            function paintBackground() {
+                const gradient = bgCtx.createLinearGradient(0, 0, width, height);
+                gradient.addColorStop(0, "#0f1624");
+                gradient.addColorStop(0.5, "#1b2434");
+                gradient.addColorStop(1, "#101825");
+                bgCtx.clearRect(0, 0, width, height);
+                bgCtx.fillStyle = gradient;
+                bgCtx.fillRect(0, 0, width, height);
+
+                for (let i = 0; i < 18; i += 1) {
+                    bgCtx.fillStyle = i % 2 === 0 ? "rgba(79, 134, 247, 0.16)" : "rgba(182, 200, 231, 0.08)";
+                    bgCtx.beginPath();
+                    bgCtx.arc(randomRange(0, width), randomRange(0, height), randomRange(12, 42), 0, Math.PI * 2);
+                    bgCtx.fill();
+                }
+
+                bgCtx.strokeStyle = "rgba(138, 156, 187, 0.12)";
+                for (let x = 0; x < width; x += 28) {
+                    bgCtx.beginPath();
+                    bgCtx.moveTo(x, 0);
+                    bgCtx.lineTo(x, height);
+                    bgCtx.stroke();
+                }
+                for (let y = 0; y < height; y += 28) {
+                    bgCtx.beginPath();
+                    bgCtx.moveTo(0, y);
+                    bgCtx.lineTo(width, y);
+                    bgCtx.stroke();
+                }
+            }
+
+            function renderPuzzle() {
+                paintBackground();
+                const displayWidth = elements.canvas.getBoundingClientRect().width || width;
+                const displayScale = displayWidth / width;
+                state.originX = randomRange(108, width - pieceSize - 24);
+                state.originY = randomRange(26, height - pieceSize - 26);
+                state.targetOffset = state.originX - 12;
+                state.targetDisplayOffset = state.targetOffset * displayScale;
+                state.currentPuzzleOffset = 0;
+                state.currentSliderOffset = 0;
+                state.maxPuzzleOffset = (width - pieceSize - 12) * displayScale;
+                state.maxSliderOffset = Math.max(elements.slider.clientWidth - elements.thumb.offsetWidth - 8, 0);
+                state.verified = false;
+                sourceCtx.clearRect(0, 0, width, height);
+                sourceCtx.drawImage(elements.canvas, 0, 0);
+
+                bgCtx.save();
+                drawShape(bgCtx, state.originX, state.originY);
+                bgCtx.fillStyle = "rgba(11, 17, 27, 0.62)";
+                bgCtx.fill();
+                bgCtx.strokeStyle = "rgba(201, 216, 245, 0.45)";
+                bgCtx.lineWidth = 2;
+                bgCtx.stroke();
+                bgCtx.restore();
+
+                pieceCtx.clearRect(0, 0, width, height);
+                pieceCtx.save();
+                drawShape(pieceCtx, 12, state.originY);
+                pieceCtx.clip();
+                pieceCtx.drawImage(sourceCanvas, 12 - state.originX, 0);
+                pieceCtx.restore();
+                pieceCtx.save();
+                drawShape(pieceCtx, 12, state.originY);
+                pieceCtx.strokeStyle = "rgba(231, 240, 255, 0.9)";
+                pieceCtx.lineWidth = 2;
+                pieceCtx.stroke();
+                pieceCtx.restore();
+
+                updateVisualState();
+            }
+
+            function updateVisualState() {
+                elements.pieceCanvas.style.transform = "translateX(" + state.currentPuzzleOffset + "px)";
+                elements.mask.style.width = state.currentPuzzleOffset + "px";
+                elements.thumb.style.transform = "translateX(" + state.currentSliderOffset + "px)";
+                elements.track.style.width = (state.currentSliderOffset + 24) + "px";
+                elements.slider.classList.toggle("is-verified", state.verified);
+                elements.hint.textContent = state.verified ? "验证通过" : "按住滑块，拖动拼图完成验证";
+                elements.status.textContent = state.verified ? "验证成功，可继续登录" : "等待验证";
+            }
+
+            function reset() {
+                elements.slider.classList.remove("is-shaking");
+                renderPuzzle();
+            }
+
+            function verify() {
+                if (Math.abs(state.currentPuzzleOffset - state.targetDisplayOffset) <= tolerance) {
+                    state.currentPuzzleOffset = state.targetDisplayOffset;
+                    state.currentSliderOffset = state.maxPuzzleOffset > 0
+                        ? (state.targetDisplayOffset / state.maxPuzzleOffset) * state.maxSliderOffset
+                        : 0;
+                    state.verified = true;
+                    updateVisualState();
+                    return true;
+                }
+                reset();
+                return false;
+            }
+
+            function handlePointerDown(clientX) {
+                if (state.verified) {
+                    return;
+                }
+                state.dragging = true;
+                state.startX = clientX;
+                state.startSliderOffset = state.currentSliderOffset;
+            }
+
+            function handlePointerMove(clientX) {
+                if (!state.dragging || state.verified) {
+                    return;
+                }
+                const delta = clientX - state.startX;
+                state.currentSliderOffset = Math.max(0, Math.min(state.maxSliderOffset, state.startSliderOffset + delta));
+                state.currentPuzzleOffset = state.maxSliderOffset > 0
+                    ? (state.currentSliderOffset / state.maxSliderOffset) * state.maxPuzzleOffset
+                    : 0;
+                updateVisualState();
+            }
+
+            function handlePointerUp() {
+                if (!state.dragging || state.verified) {
+                    state.dragging = false;
+                    return;
+                }
+                state.dragging = false;
+                verify();
+            }
+
+            elements.thumb.addEventListener("mousedown", function (event) {
+                handlePointerDown(event.clientX);
+            });
+            window.addEventListener("mousemove", function (event) {
+                handlePointerMove(event.clientX);
+            });
+            window.addEventListener("mouseup", handlePointerUp);
+
+            elements.thumb.addEventListener("touchstart", function (event) {
+                handlePointerDown(event.touches[0].clientX);
+            }, {passive: true});
+            window.addEventListener("touchmove", function (event) {
+                if (!state.dragging) {
+                    return;
+                }
+                handlePointerMove(event.touches[0].clientX);
+            }, {passive: true});
+            window.addEventListener("touchend", handlePointerUp);
+            window.addEventListener("resize", function () {
+                if (state.verified) {
+                    const displayWidth = elements.canvas.getBoundingClientRect().width || width;
+                    const displayScale = displayWidth / width;
+                    state.maxPuzzleOffset = (width - pieceSize - 12) * displayScale;
+                    state.targetDisplayOffset = state.targetOffset * displayScale;
+                    state.maxSliderOffset = Math.max(elements.slider.clientWidth - elements.thumb.offsetWidth - 8, 0);
+                    state.currentPuzzleOffset = state.targetDisplayOffset;
+                    state.currentSliderOffset = state.maxPuzzleOffset > 0
+                        ? (state.targetDisplayOffset / state.maxPuzzleOffset) * state.maxSliderOffset
+                        : 0;
+                    updateVisualState();
+                    return;
+                }
+                reset();
+            });
+
+            elements.refreshButton.addEventListener("click", reset);
+
+            reset();
+
+            return {
+                isVerified: function () {
+                    return state.verified;
+                },
+                reset: reset,
+                shake: function () {
+                    elements.slider.classList.remove("is-shaking");
+                    void elements.slider.offsetWidth;
+                    elements.slider.classList.add("is-shaking");
+                }
+            };
+        }
     });
 </script>
 </body>
 </html>
+
+

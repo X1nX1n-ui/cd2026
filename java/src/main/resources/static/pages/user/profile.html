@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -26,8 +26,8 @@
                 <div class="avatar-meta" id="avatarName">当前未设置头像</div>
                 <div class="avatar-actions">
                     <input type="file" id="avatarFile" class="avatar-file-input" accept=".jpg,.jpeg,.png,.gif,.webp,image/*">
-                    <button type="button" class="layui-btn page-secondary-btn" id="selectAvatarButton">选择图片</button>
-                    <button type="button" class="layui-btn page-btn" id="uploadAvatarButton">上传头像</button>
+                    <button type="button" class="layui-btn page-secondary-btn avatar-action-btn" id="selectAvatarButton">选择图片</button>
+                    <button type="button" class="layui-btn page-btn avatar-action-btn" id="uploadAvatarButton">上传头像</button>
                 </div>
                 <p class="avatar-tip">支持 jpg、jpeg、png、gif、webp，大小不超过 2MB。</p>
             </article>
@@ -47,9 +47,14 @@
         const avatarName = document.getElementById("avatarName");
         const selectAvatarButton = document.getElementById("selectAvatarButton");
         const uploadAvatarButton = document.getElementById("uploadAvatarButton");
+        const cachedUser = PlatformUtils.getCurrentUser();
         let currentUser = null;
         let selectedFile = null;
 
+        if (cachedUser) {
+            currentUser = cachedUser;
+            renderProfile(cachedUser);
+        }
         loadCurrentUser();
 
         selectAvatarButton.addEventListener("click", function () {
@@ -154,3 +159,5 @@
 </script>
 </body>
 </html>
+
+

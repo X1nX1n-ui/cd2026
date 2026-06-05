@@ -6,6 +6,7 @@ public class HostAssetProbeCommand {
     private Integer service;
     private Integer process;
     private Integer app;
+    private String hostName;
     private String macAddress;
     private String type;
 
@@ -39,6 +40,14 @@ public class HostAssetProbeCommand {
 
     public void setApp(Integer app) {
         this.app = app;
+    }
+
+    public String getHostName() {
+        return hostName;
+    }
+
+    public void setHostName(String hostName) {
+        this.hostName = hostName;
     }
 
     public String getMacAddress() {

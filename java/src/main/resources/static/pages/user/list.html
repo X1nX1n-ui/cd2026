@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -49,16 +49,15 @@
         const canCreate = PlatformUtils.hasPermission("sys:user:create");
         const canUpdate = PlatformUtils.hasPermission("sys:user:update");
         const canDelete = PlatformUtils.hasPermission("sys:user:delete");
-        let roleOptions = [];
+        const roleOptionsCacheKey = "page-role-options-cache";
+        let roleOptions = PlatformUtils.readSessionCache(roleOptionsCacheKey, 5 * 60 * 1000) || [];
 
         init();
 
         function init() {
             renderToolbar();
             bindSearch();
-            loadRoleOptions().then(function () {
-                renderTable();
-            });
+            renderTable();
         }
 
         function renderToolbar() {
@@ -68,7 +67,9 @@
             }
             pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createUserButton">新增用户</button>';
             document.getElementById("createUserButton").addEventListener("click", function () {
-                openUserDialog("新增用户");
+                ensureRoleOptions().then(function () {
+                    openUserDialog("新增用户");
+                });
             });
         }
 
@@ -88,11 +89,21 @@
             return PlatformUtils.request("/api/roles/options")
                 .then(function (data) {
                     roleOptions = Array.isArray(data) ? data : [];
+                    PlatformUtils.writeSessionCache(roleOptionsCacheKey, roleOptions);
                 })
                 .catch(function (error) {
                     layer.msg(error.message || "角色选项加载失败");
                     roleOptions = [];
                 });
+        }
+
+        function ensureRoleOptions() {
+            if (roleOptions.length) {
+                return Promise.resolve(roleOptions);
+            }
+            return loadRoleOptions().then(function () {
+                return roleOptions;
+            });
         }
 
         function renderTable() {
@@ -128,13 +139,15 @@
                     {field: "failedAttempts", title: "失败次数", width: 100, templet: function (row) { return PlatformUtils.renderValue(row.failedAttempts); }},
                     {field: "lockTime", title: "锁定时间", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.lockTime); }},
                     {field: "lastLoginTime", title: "最后登录", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.lastLoginTime); }},
-                    {title: "操作", width: 160, fixed: "right", templet: function (row) { return renderActions(row); }}
+                    {title: "操作", width: 160, templet: function (row) { return renderActions(row); }}
                 ]]
             });
 
             table.on("tool(userTable)", function (obj) {
                 if (obj.event === "edit") {
-                    openUserDialog("编辑用户", obj.data);
+                    ensureRoleOptions().then(function () {
+                        openUserDialog("编辑用户", obj.data);
+                    });
                 }
                 if (obj.event === "delete") {
                     layer.confirm("确认删除当前用户吗？", {title: "删除用户"}, function (index) {
@@ -325,3 +338,5 @@
 </script>
 </body>
 </html>
+
+

@@ -90,6 +90,34 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     }
 
     @Override
+    public AssetSnapshotView getByMacAddress(String assetType, String macAddress) {
+        List<AssetSnapshotView> records = listByMacAddress(assetType, macAddress);
+        return records.isEmpty() ? null : records.get(0);
+    }
+
+    @Override
+    public List<AssetSnapshotView> listByMacAddress(String assetType, String macAddress) {
+        AssetTableMeta meta = requireMeta(assetType);
+        String normalizedMacAddress = trimToNull(macAddress);
+        if (normalizedMacAddress == null) {
+            return List.of();
+        }
+
+        return jdbcTemplate.query(
+                "SELECT id, mac_address, "
+                        + meta.primaryPayloadColumn() + " AS primary_payload, "
+                        + buildSecondarySelect(meta.secondaryPayloadColumn()) + ", "
+                        + meta.primaryCountColumn() + " AS primary_count, "
+                        + buildSecondaryCountSelect(meta.secondaryCountColumn()) + ", "
+                        + "raw_payload, created_at, updated_at "
+                        + "FROM `" + meta.tableName() + "` WHERE mac_address = ? "
+                        + "ORDER BY updated_at DESC, created_at DESC, id DESC",
+                rowMapper(),
+                normalizedMacAddress
+        );
+    }
+
+    @Override
     @Transactional
     public void deleteById(String assetType, Long id) {
         AssetTableMeta meta = requireMeta(assetType);

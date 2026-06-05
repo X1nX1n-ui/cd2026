@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -13,43 +13,45 @@
         <section class="page-heading">
             <div>
                 <h1>主机管理</h1>
-                <p>实时展示主机在线状态，支持按心跳自动判定在线与离线，并提供主机详情查看。</p>
+                <p>实时展示主机在线状态，支持主机详情查看、资产明细弹窗与自动刷新。</p>
             </div>
         </section>
 
-        <section class="page-filter">
-            <form class="layui-form page-filter-form" id="searchForm">
-                <div class="layui-inline">
-                    <div class="layui-input-inline">
-                        <input type="text" name="keyword" placeholder="请输入主机名、IP、MAC 或系统名称" autocomplete="off" class="layui-input">
+        <section class="page-filter host-page-filter">
+            <form class="layui-form page-filter-form host-page-filter-form" id="searchForm">
+                <div class="host-filter-main">
+                    <div class="layui-inline host-keyword-field">
+                        <div class="layui-input-inline">
+                            <input type="text" name="keyword" placeholder="请输入主机名、IP、MAC 或系统名称" autocomplete="off" class="layui-input">
+                        </div>
                     </div>
-                </div>
-                <div class="layui-inline">
-                    <div class="layui-input-inline">
-                        <select name="status">
-                            <option value="">全部状态</option>
-                            <option value="1">在线</option>
-                            <option value="0">下线</option>
-                        </select>
+                    <div class="layui-inline">
+                        <div class="layui-input-inline">
+                            <select name="status">
+                                <option value="">全部状态</option>
+                                <option value="1">在线</option>
+                                <option value="0">下线</option>
+                            </select>
+                        </div>
                     </div>
+                    <button type="submit" class="layui-btn page-btn host-toolbar-btn">查询</button>
                 </div>
-                <button type="submit" class="layui-btn page-btn">查询</button>
-                <button type="button" class="layui-btn page-secondary-btn" id="resetSearch">重置</button>
+                <div class="host-filter-tools">
+                    <button type="button" class="layui-btn page-secondary-btn host-toolbar-btn" id="resetSearch">重置</button>
+                    <button type="button" class="layui-btn page-secondary-btn host-toolbar-btn" id="refreshButton">刷新数据</button>
+                    <div class="layui-form host-refresh-form host-toolbar-field">
+                        <div class="layui-input-inline">
+                            <select id="autoRefreshSelect">
+                                <option value="0">不刷新</option>
+                                <option value="1">1秒</option>
+                                <option value="3">3秒</option>
+                                <option value="5">5秒</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="host-refresh-hint host-toolbar-field" id="refreshHint">当前为手动刷新模式</div>
+                </div>
             </form>
-            <div class="page-toolbar">
-                <button type="button" class="layui-btn page-secondary-btn" id="refreshButton">刷新数据</button>
-                <div class="layui-form host-refresh-form">
-                    <div class="layui-input-inline">
-                        <select id="autoRefreshSelect">
-                            <option value="0">不刷新</option>
-                            <option value="1">1秒</option>
-                            <option value="3">3秒</option>
-                            <option value="5">5秒</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="host-refresh-hint" id="refreshHint">当前为手动刷新模式</div>
-            </div>
         </section>
 
         <section class="page-table-card">
@@ -70,8 +72,50 @@
         const refreshButton = document.getElementById("refreshButton");
         const autoRefreshSelect = document.getElementById("autoRefreshSelect");
         const refreshHint = document.getElementById("refreshHint");
+        const canProbe = PlatformUtils.hasPermission("asset:host:view");
         const canUpdate = PlatformUtils.hasPermission("asset:host:update");
         const canDelete = PlatformUtils.hasPermission("asset:host:delete");
+        const riskFilterLabels = {
+            all: "全部",
+            high: "高风险",
+            medium: "中风险",
+            low: "低风险",
+            safe: "无风险"
+        };
+        const riskLevelMap = {
+            "高": "high",
+            "高风险": "high",
+            "中": "medium",
+            "中风险": "medium",
+            "低": "low",
+            "低风险": "low",
+            "无": "safe",
+            "无风险": "safe"
+        };
+        const assetTypeMap = {
+            account: {
+                label: "账号",
+                primaryCountLabel: "账号数量",
+                primarySectionTitle: "账号列表",
+                secondaryCountLabel: "影子账号数量",
+                secondarySectionTitle: "影子账号"
+            },
+            service: {
+                label: "服务",
+                primaryCountLabel: "服务数量",
+                primarySectionTitle: "服务列表"
+            },
+            process: {
+                label: "进程",
+                primaryCountLabel: "进程数量",
+                primarySectionTitle: "进程列表"
+            },
+            app: {
+                label: "安装程序",
+                primaryCountLabel: "安装程序数量",
+                primarySectionTitle: "安装程序列表"
+            }
+        };
 
         let autoRefreshTimer = null;
         let isReloading = false;
@@ -152,13 +196,24 @@
                     {field: "osName", title: "操作系统", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.osName || row.osDetail); }},
                     {field: "memoryUsage", title: "内存占用", minWidth: 150, templet: function (row) { return renderMemoryUsage(row); }},
                     {field: "status", title: "状态", width: 120, templet: function (row) { return PlatformUtils.renderHostStatus(row.status); }},
-                    {title: "操作", minWidth: 220, fixed: "right", templet: function () { return renderActions(); }}
+                    {title: "资产", minWidth: 188, templet: function (row) { return renderAssetActions(row); }},
+                    {title: "操作", minWidth: 188, templet: function () { return renderActions(); }}
                 ]]
             });
 
             table.on("tool(hostTable)", function (obj) {
                 if (obj.event === "detail") {
                     openDetailDialog(obj.data.id);
+                    return;
+                }
+
+                if (obj.event.indexOf("asset:") === 0) {
+                    openAssetDialog(obj.data, obj.event.split(":")[1]);
+                    return;
+                }
+
+                if (obj.event === "probe") {
+                    openProbeDialog(obj.data);
                     return;
                 }
 
@@ -218,10 +273,110 @@
             if (canUpdate) {
                 actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="edit">编辑</a>');
             }
+            if (canProbe) {
+                actions.push('<a class="layui-btn layui-btn-xs page-btn" lay-event="probe">资产探测</a>');
+            }
             if (canDelete) {
                 actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
             }
-            return actions.join("") || '<span class="table-empty-action">--</span>';
+            return actions.length
+                ? '<div class="host-table-action-grid host-table-action-grid-compact">' + actions.join("") + '</div>'
+                : '<span class="table-empty-action">--</span>';
+        }
+
+        function renderAssetActions() {
+            return '<div class="host-table-action-grid asset-action-grid">'
+                + '<a class="layui-btn layui-btn-xs page-btn asset-action-btn" lay-event="asset:account"><span>账号</span></a>'
+                + '<a class="layui-btn layui-btn-xs page-btn asset-action-btn" lay-event="asset:service"><span>服务</span></a>'
+                + '<a class="layui-btn layui-btn-xs page-btn asset-action-btn" lay-event="asset:process"><span>进程</span></a>'
+                + '<a class="layui-btn layui-btn-xs page-btn asset-action-btn" lay-event="asset:app"><span>App</span></a>'
+                + '</div>';
+        }
+
+        function openProbeDialog(host) {
+            if (String(host.status || "") !== "1" && String(host.status || "").toUpperCase() !== "ONLINE") {
+                layer.msg("仅在线主机支持发起资产探测");
+                return;
+            }
+
+            const dialogWidth = Math.min(window.innerWidth - 32, 720) + "px";
+            layer.open({
+                type: 1,
+                title: "发起资产探测",
+                area: [dialogWidth, "auto"],
+                shadeClose: true,
+                content: buildProbeDialog(host),
+                success: function (layero, index) {
+                    const rootElement = layero[0] || layero;
+                    const submitButton = rootElement.querySelector(".probe-submit");
+                    const cancelButton = rootElement.querySelector(".probe-cancel");
+
+                    cancelButton.addEventListener("click", function () {
+                        layer.close(index);
+                    });
+
+                    submitButton.addEventListener("click", function () {
+                        const payload = {
+                            account: rootElement.querySelector('input[name="account"]').checked ? 1 : 0,
+                            service: rootElement.querySelector('input[name="service"]').checked ? 1 : 0,
+                            process: rootElement.querySelector('input[name="process"]').checked ? 1 : 0,
+                            app: rootElement.querySelector('input[name="app"]').checked ? 1 : 0,
+                            type: "assets"
+                        };
+
+                        if (!payload.account && !payload.service && !payload.process && !payload.app) {
+                            layer.msg("请至少选择一个探测模块");
+                            return;
+                        }
+
+                        PlatformUtils.request("/api/hosts/" + host.id + "/asset-probe", {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(function () {
+                                layer.close(index);
+                                layer.msg("资产探测指令已发送到队列");
+                            })
+                            .catch(function (error) {
+                                layer.msg(error.message || "资产探测指令发送失败");
+                            });
+                    });
+                }
+            });
+        }
+
+        function buildProbeDialog(host) {
+            return '<div class="asset-dialog-shell">'
+                + '<section class="probe-host-summary">'
+                + '<div class="probe-host-summary-title">' + PlatformUtils.escapeHtml(host.hostname || "未命名主机") + '</div>'
+                + '<div class="probe-host-summary-meta">'
+                + '<span>MAC：' + PlatformUtils.escapeHtml(host.macAddress || "--") + '</span>'
+                + '<span>主IP：' + PlatformUtils.escapeHtml(host.ipAddress || "--") + '</span>'
+                + '<span>状态：在线</span>'
+                + '</div>'
+                + '</section>'
+                + '<div class="check-group probe-option-grid">'
+                + renderProbeCheck("account", "账号", "包含本机账号与影子账号")
+                + renderProbeCheck("service", "服务", "采集当前主机服务信息")
+                + renderProbeCheck("process", "进程", "采集当前主机运行进程")
+                + renderProbeCheck("app", "安装程序", "采集当前主机已安装软件")
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn probe-cancel">取消</button>'
+                + '<button type="button" class="layui-btn page-btn probe-submit">发送探测指令</button>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function renderProbeCheck(name, label, description) {
+            return '<label class="check-item probe-check-item">'
+                + '<input type="checkbox" name="' + PlatformUtils.escapeHtml(name) + '" checked>'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<em>' + PlatformUtils.escapeHtml(description) + '</em>'
+                + '</label>';
         }
 
         function configureAutoRefresh(value) {
@@ -348,6 +503,545 @@
                 + '</div>';
         }
 
+        function openAssetDialog(host, assetType) {
+            const assetMeta = assetTypeMap[assetType];
+            if (!assetMeta) {
+                layer.msg("暂不支持该资产类型");
+                return;
+            }
+
+            const loadingIndex = layer.load(1, {shade: [0.08, "#000"]});
+            PlatformUtils.request("/api/hosts/" + host.id + "/asset-history/" + assetType)
+                .then(function (history) {
+                    layer.close(loadingIndex);
+                    const snapshots = Array.isArray(history) ? history : [];
+                    const dialogWidth = Math.min(window.innerWidth - 32, 1360) + "px";
+                    layer.open({
+                        type: 1,
+                        title: assetMeta.label + "资产记录",
+                        area: [dialogWidth, "84vh"],
+                        shadeClose: true,
+                        maxmin: true,
+                        content: buildAssetHistoryDialog(host, snapshots, assetType, assetMeta),
+                        success: function (layero) {
+                            const rootElement = layero[0] || layero;
+                            bindAssetHistoryDialog(rootElement, host, snapshots, assetMeta);
+                        }
+                    });
+                })
+                .catch(function (error) {
+                    layer.close(loadingIndex);
+                    layer.msg(error.message || "获取资产详情失败");
+                });
+        }
+
+        function buildAssetHistoryDialog(host, snapshots, assetType, assetMeta) {
+            const defaultSnapshot = snapshots[0] || null;
+            return '<div class="asset-history-shell"'
+                + ' data-host-id="' + PlatformUtils.escapeHtml(String(host.id)) + '"'
+                + ' data-asset-type="' + PlatformUtils.escapeHtml(assetType) + '">'
+                + '<section class="asset-record-header">'
+                + '<div class="asset-record-header-main">'
+                + '<div class="asset-record-header-tag">' + PlatformUtils.escapeHtml(assetMeta.label) + ' 历史记录</div>'
+                + '<h3>' + PlatformUtils.escapeHtml(assetMeta.label) + '记录查看</h3>'
+                + '<p>主机名：' + PlatformUtils.escapeHtml(host.hostname || "--") + '</p>'
+                + '<p>MAC：' + PlatformUtils.escapeHtml(host.macAddress || "--") + '</p>'
+                + '</div>'
+                + '<div class="asset-record-header-note">'
+                + '<strong>查看方式</strong>'
+                + '<span>单击左侧历史记录可查看详情，勾选两条记录后可并排对比。</span>'
+                + '</div>'
+                + '</section>'
+                + '<section class="asset-history-toolbar">'
+                + '<div class="asset-history-toolbar-copy">'
+                + '<strong>共找到 ' + snapshots.length + ' 条' + PlatformUtils.escapeHtml(assetMeta.label) + '历史记录</strong>'
+                + '<span>单击左侧记录查看详情，勾选两条记录后可以并排对比差异。</span>'
+                + '</div>'
+                + '<div class="asset-history-toolbar-actions">'
+                + (assetType === "account" ? '<button type="button" class="layui-btn page-btn asset-ai-analyze-trigger">AI辅助分析</button>' : '')
+                + '<button type="button" class="layui-btn page-btn asset-compare-trigger" disabled>对比选中记录</button>'
+                + '<button type="button" class="layui-btn page-secondary-btn asset-compare-cancel" style="display:none;">退出对比</button>'
+                + '</div>'
+                + '</section>'
+                + '<section class="asset-history-layout">'
+                + '<aside class="asset-history-list">'
+                + (snapshots.length ? snapshots.map(function (snapshot, index) {
+                    return renderHistoryItem(snapshot, index, assetMeta);
+                }).join("") : '<div class="asset-history-empty">当前没有历史记录</div>')
+                + '</aside>'
+                + '<div class="asset-history-stage">'
+                + '<div class="asset-history-stage-content">'
+                + (defaultSnapshot ? buildAssetSnapshotView(host, defaultSnapshot, assetMeta) : '<div class="asset-history-empty">请选择一条记录查看详情</div>')
+                + '</div>'
+                + '</div>'
+                + '</section>'
+                + '</div>';
+        }
+
+        function renderHistoryItem(snapshot, index, assetMeta) {
+            const updatedAt = PlatformUtils.formatDateTime(snapshot.updatedAt);
+            const createdAt = PlatformUtils.formatDateTime(snapshot.createdAt);
+            const metrics = [
+                renderHistoryMetric(assetMeta.primaryCountLabel, snapshot.primaryCount)
+            ];
+            if (assetMeta.secondaryCountLabel) {
+                metrics.push(renderHistoryMetric(assetMeta.secondaryCountLabel, snapshot.secondaryCount));
+            }
+            return '<article class="asset-history-item' + (index === 0 ? ' is-active' : '') + '"'
+                + ' data-snapshot-id="' + PlatformUtils.escapeHtml(String(snapshot.id)) + '">'
+                + '<div class="asset-history-item-content">'
+                + '<div class="asset-history-item-top">'
+                + '<div class="asset-history-item-title-wrap">'
+                + '<span class="asset-history-item-title">记录 #' + PlatformUtils.escapeHtml(String(snapshot.id)) + '</span>'
+                + (index === 0 ? '<span class="asset-history-item-badge">最新</span>' : '')
+                + '</div>'
+                + '<span class="asset-history-item-time">更新时间：' + PlatformUtils.escapeHtml(updatedAt || "--") + '</span>'
+                + '</div>'
+                + '<div class="asset-history-item-summary">' + metrics.join("") + '</div>'
+                + '<div class="asset-history-item-bottom">'
+                + '<span class="asset-history-item-time">记录时间：' + PlatformUtils.escapeHtml(createdAt || "--") + '</span>'
+                + '<span class="asset-history-item-time">记录编号：' + PlatformUtils.escapeHtml(String(snapshot.id)) + '</span>'
+                + '</div>'
+                + '</div>'
+                + '<label class="asset-history-item-check">'
+                + '<input type="checkbox" class="asset-compare-checkbox" value="' + PlatformUtils.escapeHtml(String(snapshot.id)) + '">'
+                + '<span>对比</span>'
+                + '</div>'
+                + '</article>';
+        }
+
+        function bindAssetHistoryDialog(rootElement, host, snapshots, assetMeta) {
+            const snapshotMap = {};
+            snapshots.forEach(function (snapshot) {
+                snapshotMap[String(snapshot.id)] = snapshot;
+            });
+
+            const stageContent = rootElement.querySelector(".asset-history-stage-content");
+            const compareTrigger = rootElement.querySelector(".asset-compare-trigger");
+            const compareCancel = rootElement.querySelector(".asset-compare-cancel");
+            const analyzeTrigger = rootElement.querySelector(".asset-ai-analyze-trigger");
+            const historyItems = Array.from(rootElement.querySelectorAll(".asset-history-item"));
+            const compareCheckboxes = Array.from(rootElement.querySelectorAll(".asset-compare-checkbox"));
+            let currentRiskFilter = "all";
+            let isAnalyzing = false;
+
+            function syncCompareState() {
+                const checkedIds = compareCheckboxes
+                    .filter(function (input) { return input.checked; })
+                    .map(function (input) { return input.value; });
+                compareTrigger.disabled = checkedIds.length !== 2;
+                return checkedIds;
+            }
+
+            function renderSnapshot(snapshot) {
+                stageContent.innerHTML = snapshot
+                    ? buildAssetSnapshotView(host, snapshot, assetMeta, currentRiskFilter)
+                    : '<div class="asset-history-empty">未找到该条记录</div>';
+                if (assetMeta.label === "账号") {
+                    bindAccountRiskFilters(stageContent, snapshot, host, assetMeta, function (nextRiskFilter) {
+                        currentRiskFilter = nextRiskFilter;
+                    });
+                }
+            }
+
+            historyItems.forEach(function (item) {
+                item.addEventListener("click", function (event) {
+                    if (event.target.closest(".asset-history-item-check")) {
+                        return;
+                    }
+                    historyItems.forEach(function (node) {
+                        node.classList.toggle("is-active", node === item);
+                    });
+                    const snapshotId = item.getAttribute("data-snapshot-id");
+                    const snapshot = snapshotMap[snapshotId];
+                    renderSnapshot(snapshot);
+                    compareCancel.style.display = "none";
+                });
+            });
+
+            compareCheckboxes.forEach(function (input) {
+                input.addEventListener("change", function () {
+                    const checkedIds = syncCompareState();
+                    if (checkedIds.length > 2) {
+                        input.checked = false;
+                        layer.msg("最多只能选择两条记录进行对比");
+                        syncCompareState();
+                    }
+                });
+            });
+
+            compareTrigger.addEventListener("click", function () {
+                const checkedIds = syncCompareState();
+                if (checkedIds.length !== 2) {
+                    layer.msg("请选择两条记录进行对比");
+                    return;
+                }
+                const leftSnapshot = snapshotMap[checkedIds[0]];
+                const rightSnapshot = snapshotMap[checkedIds[1]];
+                stageContent.innerHTML = buildAssetCompareView(host, leftSnapshot, rightSnapshot, assetMeta);
+                compareCancel.style.display = "inline-flex";
+                historyItems.forEach(function (node) {
+                    node.classList.remove("is-active");
+                });
+            });
+
+            compareCancel.addEventListener("click", function () {
+                compareCancel.style.display = "none";
+                const fallbackSnapshot = snapshots[0] || null;
+                if (!fallbackSnapshot) {
+                    stageContent.innerHTML = '<div class="asset-history-empty">当前没有历史记录</div>';
+                    return;
+                }
+                renderSnapshot(fallbackSnapshot);
+                historyItems.forEach(function (node, index) {
+                    node.classList.toggle("is-active", index === 0);
+                });
+            });
+
+            if (analyzeTrigger) {
+                analyzeTrigger.addEventListener("click", function () {
+                    if (isAnalyzing) {
+                        return;
+                    }
+                    isAnalyzing = true;
+                    analyzeTrigger.disabled = true;
+                    analyzeTrigger.textContent = "分析中...";
+                    PlatformUtils.request("/api/hosts/" + host.id + "/asset-detail/account/analyze", {
+                        method: "POST"
+                    })
+                        .then(function (latestSnapshot) {
+                            layer.msg("AI 分析完成");
+                            currentRiskFilter = "all";
+                            const normalizedSnapshot = latestSnapshot || null;
+                            if (normalizedSnapshot) {
+                                snapshotMap[String(normalizedSnapshot.id)] = normalizedSnapshot;
+                            }
+                            renderSnapshot(normalizedSnapshot);
+                            historyItems.forEach(function (node) {
+                                node.classList.toggle("is-active", String(node.getAttribute("data-snapshot-id")) === String(normalizedSnapshot && normalizedSnapshot.id));
+                            });
+                        })
+                        .catch(function (error) {
+                            layer.msg(error.message || "AI 分析失败");
+                        })
+                        .finally(function () {
+                            isAnalyzing = false;
+                            analyzeTrigger.disabled = false;
+                            analyzeTrigger.textContent = "AI辅助分析";
+                        });
+                });
+            }
+
+            syncCompareState();
+        }
+
+        function buildAssetSnapshotView(host, snapshot, assetMeta, riskFilter) {
+            const primaryItems = parseJsonArray(snapshot && snapshot.primaryPayload);
+            const secondaryItems = parseJsonArray(snapshot && snapshot.secondaryPayload);
+            const rawPayload = prettyJson(snapshot && snapshot.rawPayload);
+            const summaryCards = [
+                renderMetricCard(assetMeta.primaryCountLabel, snapshot && snapshot.primaryCount),
+                renderMetricCard("记录时间", snapshot ? PlatformUtils.formatDateTime(snapshot.createdAt) : "--")
+            ];
+
+            if (assetMeta.secondaryCountLabel) {
+                summaryCards.push(renderMetricCard(assetMeta.secondaryCountLabel, snapshot && snapshot.secondaryCount));
+            }
+            summaryCards.push(renderMetricCard("更新时间", snapshot ? PlatformUtils.formatDateTime(snapshot.updatedAt) : "--"));
+
+            const normalizedRiskFilter = riskFilter || "all";
+            const filteredPrimaryItems = assetMeta.label === "账号" ? filterRiskItems(primaryItems, normalizedRiskFilter) : primaryItems;
+            const filteredSecondaryItems = assetMeta.label === "账号" ? filterRiskItems(secondaryItems, normalizedRiskFilter) : secondaryItems;
+            const riskStats = assetMeta.label === "账号" ? buildRiskStats(primaryItems, secondaryItems) : [];
+
+            return '<div class="asset-dialog-shell">'
+                + '<section class="asset-section-head asset-snapshot-head">'
+                + '<h3>记录 #' + PlatformUtils.escapeHtml(String(snapshot ? snapshot.id : "--")) + '</h3>'
+                + '<p>查看本次' + PlatformUtils.escapeHtml(assetMeta.label) + '采集结果的详细内容。</p>'
+                + '</section>'
+                + '<section class="asset-summary-grid' + (assetMeta.label === "账号" ? ' asset-account-summary-grid' : '') + '">' + summaryCards.join("") + riskStats.join("") + '</section>'
+                + (assetMeta.label === "账号" ? renderRiskFilterTabs(normalizedRiskFilter) : '')
+                + renderAssetSectionBlock(assetMeta.primarySectionTitle, filteredPrimaryItems, assetMeta.label === "账号" ? {
+                    totalCount: primaryItems.length,
+                    filteredCount: filteredPrimaryItems.length,
+                    riskMode: true
+                } : null)
+                + (assetMeta.secondarySectionTitle ? renderAssetSectionBlock(assetMeta.secondarySectionTitle, filteredSecondaryItems, assetMeta.label === "账号" ? {
+                    totalCount: secondaryItems.length,
+                    filteredCount: filteredSecondaryItems.length,
+                    riskMode: true
+                } : null) : "")
+                + renderAssetRawBlock(rawPayload)
+                + '</div>';
+        }
+
+        function buildAssetCompareView(host, leftSnapshot, rightSnapshot, assetMeta) {
+            return '<div class="asset-compare-grid">'
+                + '<section class="asset-compare-column">'
+                + '<div class="asset-compare-head">'
+                + '<h4>记录 #' + PlatformUtils.escapeHtml(String(leftSnapshot.id)) + '</h4>'
+                + '<span>更新时间：' + PlatformUtils.escapeHtml(PlatformUtils.formatDateTime(leftSnapshot.updatedAt) || "--") + '</span>'
+                + '</div>'
+                + buildAssetSnapshotView(host, leftSnapshot, assetMeta)
+                + '</section>'
+                + '<section class="asset-compare-column">'
+                + '<div class="asset-compare-head">'
+                + '<h4>记录 #' + PlatformUtils.escapeHtml(String(rightSnapshot.id)) + '</h4>'
+                + '<span>更新时间：' + PlatformUtils.escapeHtml(PlatformUtils.formatDateTime(rightSnapshot.updatedAt) || "--") + '</span>'
+                + '</div>'
+                + buildAssetSnapshotView(host, rightSnapshot, assetMeta)
+                + '</section>'
+                + '</div>';
+        }
+
+        function renderAssetSectionBlock(title, items, options) {
+            const config = options || {};
+            const suffix = typeof config.filteredCount === "number"
+                ? '（当前显示 ' + config.filteredCount + ' / ' + (config.totalCount || 0) + '）'
+                : '';
+            return '<section class="asset-array-section">'
+                + '<div class="asset-block-head">'
+                + '<div class="asset-block-title">' + PlatformUtils.escapeHtml(title) + suffix + '</div>'
+                + '<span class="asset-block-count">共 ' + items.length + ' 条</span>'
+                + '</div>'
+                + (items.length ? renderArrayGrid(items, !!config.riskMode) : '<div class="asset-empty-inline">暂无数据</div>')
+                + '</section>';
+        }
+
+        function renderAssetRawBlock(rawPayload) {
+            return '<section class="asset-raw-block">'
+                + '<div class="asset-block-head">'
+                + '<div class="asset-block-title">原始消息</div>'
+                + '<span class="asset-block-hint">用于排障和核对上报内容</span>'
+                + '</div>'
+                + '<pre>' + PlatformUtils.escapeHtml(rawPayload) + '</pre>'
+                + '</section>';
+        }
+
+        function renderArrayGrid(items, riskMode) {
+            return '<div class="asset-array-grid">'
+                + items.map(function (item, index) {
+                    return renderObjectCard(index, item, riskMode);
+                }).join("")
+                + '</div>';
+        }
+
+        function renderObjectCard(index, item, riskMode) {
+            const entries = item && typeof item === "object" && !Array.isArray(item)
+                ? Object.entries(item)
+                : [["value", item]];
+            const riskLevel = riskMode ? normalizeRiskLevel(item && item.risk_level) : "";
+            const riskBadge = riskLevel
+                ? '<span class="asset-risk-badge asset-risk-' + PlatformUtils.escapeHtml(riskLevel) + '">' + PlatformUtils.escapeHtml(getRiskDisplayLabel(riskLevel)) + '</span>'
+                : '';
+            return '<article class="asset-object-card">'
+                + '<header><span>第 ' + (index + 1) + ' 项</span>' + riskBadge + '</header>'
+                + '<div class="asset-object-fields">'
+                + entries.map(function (entry) {
+                    return '<div class="asset-object-field">'
+                        + '<label>' + PlatformUtils.escapeHtml(formatFieldLabel(entry[0])) + '</label>'
+                        + '<div>' + formatAnyValue(entry[1]) + '</div>'
+                        + '</div>';
+                }).join("")
+                + '</div>'
+                + '</article>';
+        }
+
+        function renderMetricCard(label, value, rawHtml) {
+            const renderedValue = rawHtml ? value : PlatformUtils.renderValue(value);
+            return '<div class="asset-summary-card">'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<strong>' + renderedValue + '</strong>'
+                + '</div>';
+        }
+
+        function renderHistoryMetric(label, value) {
+            return '<span class="asset-history-summary-pill">'
+                + PlatformUtils.escapeHtml(label) + '：' + PlatformUtils.escapeHtml(String(value == null || value === "" ? "--" : value))
+                + '</span>';
+        }
+
+        function renderRiskFilterTabs(activeKey) {
+            const keys = ["all", "high", "medium", "low", "safe"];
+            return '<div class="asset-risk-tabs">'
+                + keys.map(function (key) {
+                    return '<button type="button" class="asset-risk-tab' + (key === activeKey ? ' is-active' : '') + '" data-risk-filter="' + key + '">'
+                        + PlatformUtils.escapeHtml(riskFilterLabels[key])
+                        + '</button>';
+                }).join("")
+                + '</div>';
+        }
+
+        function buildRiskStats(primaryItems, secondaryItems) {
+            const allItems = primaryItems.concat(secondaryItems);
+            const buckets = {
+                high: 0,
+                medium: 0,
+                low: 0,
+                safe: 0
+            };
+            allItems.forEach(function (item) {
+                const key = resolveRiskLevel(item);
+                if (buckets[key] !== undefined) {
+                    buckets[key] += 1;
+                }
+            });
+            return [
+                renderRiskStatCard("高风险账号", buckets.high, "high"),
+                renderRiskStatCard("中风险账号", buckets.medium, "medium"),
+                renderRiskStatCard("低风险账号", buckets.low, "low"),
+                renderRiskStatCard("无风险账号", buckets.safe, "safe")
+            ];
+        }
+
+        function renderRiskStatCard(label, count, riskKey) {
+            return '<div class="asset-summary-card asset-risk-summary-card asset-risk-summary-' + PlatformUtils.escapeHtml(riskKey) + '">'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<strong>' + PlatformUtils.escapeHtml(String(count || 0)) + '</strong>'
+                + '</div>';
+        }
+
+        function bindAccountRiskFilters(container, snapshot, host, assetMeta, onChange) {
+            Array.from(container.querySelectorAll("[data-risk-filter]")).forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const nextRiskFilter = button.getAttribute("data-risk-filter") || "all";
+                    if (typeof onChange === "function") {
+                        onChange(nextRiskFilter);
+                    }
+                    container.innerHTML = buildAssetSnapshotView(host, snapshot, assetMeta, nextRiskFilter);
+                    bindAccountRiskFilters(container, snapshot, host, assetMeta, onChange);
+                });
+            });
+        }
+
+        function filterRiskItems(items, riskKey) {
+            if (riskKey === "all") {
+                return items;
+            }
+            return items.filter(function (item) {
+                return resolveRiskLevel(item) === riskKey;
+            });
+        }
+
+        function normalizeRiskLevel(value) {
+            if (!value) {
+                return "";
+            }
+            const raw = String(value).trim();
+            if (!raw) {
+                return "";
+            }
+            if (riskLevelMap[raw]) {
+                return riskLevelMap[raw];
+            }
+
+            const normalized = raw
+                .replace(/\s+/g, "")
+                .replace(/[：:，,。；;！!？?]/g, "")
+                .toLowerCase();
+
+            if (normalized.indexOf("high") >= 0 || normalized.indexOf("高风险") >= 0 || normalized === "高") {
+                return "high";
+            }
+            if (normalized.indexOf("medium") >= 0 || normalized.indexOf("中风险") >= 0 || normalized === "中") {
+                return "medium";
+            }
+            if (normalized.indexOf("low") >= 0 || normalized.indexOf("低风险") >= 0 || normalized === "低") {
+                return "low";
+            }
+            if (normalized.indexOf("safe") >= 0 || normalized.indexOf("norisk") >= 0
+                || normalized.indexOf("无风险") >= 0 || normalized === "无") {
+                return "safe";
+            }
+            return "";
+        }
+
+        function resolveRiskLevel(item) {
+            if (!item || typeof item !== "object") {
+                return "";
+            }
+            const direct = normalizeRiskLevel(item.risk_level);
+            if (direct) {
+                return direct;
+            }
+
+            const resultText = String(item.result || "");
+            if (!resultText) {
+                return "";
+            }
+            if (resultText.indexOf("高风险") >= 0 || resultText.indexOf("风险等级：高") >= 0 || resultText.indexOf("风险等级:高") >= 0) {
+                return "high";
+            }
+            if (resultText.indexOf("中风险") >= 0 || resultText.indexOf("风险等级：中") >= 0 || resultText.indexOf("风险等级:中") >= 0) {
+                return "medium";
+            }
+            if (resultText.indexOf("低风险") >= 0 || resultText.indexOf("风险等级：低") >= 0 || resultText.indexOf("风险等级:低") >= 0) {
+                return "low";
+            }
+            if (resultText.indexOf("无风险") >= 0 || resultText.indexOf("风险等级：无") >= 0 || resultText.indexOf("风险等级:无") >= 0) {
+                return "safe";
+            }
+            return "";
+        }
+
+        function getRiskDisplayLabel(riskKey) {
+            return riskFilterLabels[riskKey] || "未分析";
+        }
+
+        function formatFieldLabel(field) {
+            const fieldMap = {
+                name: "账号名",
+                enabled: "启用状态",
+                full_name: "全名",
+                description: "描述",
+                sid: "SID",
+                last_logon: "最后登录时间",
+                is_shadow_account: "是否影子账号",
+                risk_level: "风险等级",
+                result: "分析结果"
+            };
+            return fieldMap[field] || field;
+        }
+
+        function formatAnyValue(value) {
+            if (value === null || value === undefined || value === "") {
+                return '<span class="asset-value-muted">--</span>';
+            }
+            if (typeof value === "string" && value.indexOf("风险原因：") >= 0) {
+                return '<div class="asset-analysis-result">' + PlatformUtils.escapeHtml(value).replace(/\n/g, "<br>") + '</div>';
+            }
+            if (Array.isArray(value) || typeof value === "object") {
+                return '<pre class="asset-inline-pre">' + PlatformUtils.escapeHtml(JSON.stringify(value, null, 2)) + '</pre>';
+            }
+            if (typeof value === "boolean") {
+                return PlatformUtils.escapeHtml(value ? "true" : "false");
+            }
+            return PlatformUtils.escapeHtml(String(value));
+        }
+
+        function parseJsonArray(value) {
+            if (!value) {
+                return [];
+            }
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function prettyJson(value) {
+            if (!value) {
+                return "--";
+            }
+            try {
+                return JSON.stringify(JSON.parse(value), null, 2);
+            } catch (error) {
+                return String(value);
+            }
+        }
+
         function openHostDialog(title, host) {
             const dialogWidth = Math.min(window.innerWidth - 32, 920) + "px";
 
@@ -471,3 +1165,5 @@
 </script>
 </body>
 </html>
+
+

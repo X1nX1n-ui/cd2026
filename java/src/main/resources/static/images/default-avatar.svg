@@ -1,5 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" fill="none">
-  <rect width="240" height="240" rx="24" fill="#EEF5E6"/>
-  <circle cx="120" cy="90" r="40" fill="#7EA65A"/>
-  <path d="M56 194C63.57 157.8 88.02 140 120 140C151.98 140 176.43 157.8 184 194" fill="#7EA65A"/>
+  <rect width="240" height="240" rx="24" fill="#10131A"/>
+  <rect x="18" y="18" width="204" height="204" rx="18" fill="url(#panel)" stroke="#2C3442"/>
+  <circle cx="120" cy="88" r="36" fill="url(#head)" stroke="#8FB3FF" stroke-width="2"/>
+  <path d="M61 188C69.09 153.44 91.36 136 120 136C148.64 136 170.91 153.44 179 188" fill="url(#body)" stroke="#8FB3FF" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M54 54H86" stroke="#4F86F7" stroke-width="4" stroke-linecap="round" opacity=".75"/>
+  <path d="M154 54H186" stroke="#4F86F7" stroke-width="4" stroke-linecap="round" opacity=".75"/>
+  <path d="M48 199H96" stroke="#3D69C4" stroke-width="4" stroke-linecap="round" opacity=".65"/>
+  <path d="M144 199H192" stroke="#3D69C4" stroke-width="4" stroke-linecap="round" opacity=".65"/>
+  <defs>
+    <linearGradient id="panel" x1="24" y1="24" x2="216" y2="216" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#192131"/>
+      <stop offset="1" stop-color="#111723"/>
+    </linearGradient>
+    <linearGradient id="head" x1="120" y1="52" x2="120" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7EA8FF"/>
+      <stop offset="1" stop-color="#4F86F7"/>
+    </linearGradient>
+    <linearGradient id="body" x1="120" y1="136" x2="120" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5E92FA"/>
+      <stop offset="1" stop-color="#355FAE"/>
+    </linearGradient>
+  </defs>
 </svg>

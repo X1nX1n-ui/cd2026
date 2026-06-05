@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -49,14 +49,15 @@
         const canCreate = PlatformUtils.hasPermission("sys:role:create");
         const canUpdate = PlatformUtils.hasPermission("sys:role:update");
         const canDelete = PlatformUtils.hasPermission("sys:role:delete");
-        let permissionOptions = [];
+        const permissionOptionsCacheKey = "page-permission-options-cache";
+        let permissionOptions = PlatformUtils.readSessionCache(permissionOptionsCacheKey, 5 * 60 * 1000) || [];
 
         init();
 
         function init() {
             renderToolbar();
             bindSearch();
-            loadPermissionOptions().then(renderTable);
+            renderTable();
         }
 
         function renderToolbar() {
@@ -65,7 +66,9 @@
             }
             pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createRoleButton">新增角色</button>';
             document.getElementById("createRoleButton").addEventListener("click", function () {
-                openRoleDialog("新增角色");
+                ensurePermissionOptions().then(function () {
+                    openRoleDialog("新增角色");
+                });
             });
         }
 
@@ -84,11 +87,21 @@
             return PlatformUtils.request("/api/permissions/options")
                 .then(function (data) {
                     permissionOptions = Array.isArray(data) ? data : [];
+                    PlatformUtils.writeSessionCache(permissionOptionsCacheKey, permissionOptions);
                 })
                 .catch(function (error) {
                     permissionOptions = [];
                     layer.msg(error.message || "权限选项加载失败");
                 });
+        }
+
+        function ensurePermissionOptions() {
+            if (permissionOptions.length) {
+                return Promise.resolve(permissionOptions);
+            }
+            return loadPermissionOptions().then(function () {
+                return permissionOptions;
+            });
         }
 
         function renderTable() {
@@ -121,13 +134,15 @@
                     {field: "description", title: "角色说明", minWidth: 220, templet: function (row) { return PlatformUtils.renderValue(row.description); }},
                     {field: "permissionIds", title: "权限数量", width: 100, templet: function (row) { return (row.permissionIds || []).length; }},
                     {field: "updatedAt", title: "更新时间", minWidth: 180, templet: function (row) { return PlatformUtils.formatDateTime(row.updatedAt); }},
-                    {title: "操作", width: 160, fixed: "right", templet: function (row) { return renderActions(row); }}
+                    {title: "操作", width: 160, templet: function (row) { return renderActions(row); }}
                 ]]
             });
 
             table.on("tool(roleTable)", function (obj) {
                 if (obj.event === "edit") {
-                    openRoleDialog("编辑角色", obj.data);
+                    ensurePermissionOptions().then(function () {
+                        openRoleDialog("编辑角色", obj.data);
+                    });
                 }
                 if (obj.event === "delete") {
                     layer.confirm("确认删除当前角色吗？", {title: "删除角色"}, function (index) {
@@ -298,3 +313,5 @@
 </script>
 </body>
 </html>
+
+

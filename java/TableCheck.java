@@ -1,4 +1,4 @@
-﻿import java.sql.*;
+import java.sql.*;
 public class TableCheck {
   public static void main(String[] args) throws Exception {
     Class.forName("com.mysql.cj.jdbc.Driver");

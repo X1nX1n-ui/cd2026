@@ -1,14 +1,17 @@
 package com.cd.server.impl;
 
 import com.alibaba.fastjson.JSON;
+import com.cd.entity.Host;
 import com.cd.entity.HostAssetProbeCommand;
 import com.cd.exception.BusinessException;
+import com.cd.mapper.HostMapper;
 import com.cd.server.HostProbeCommandService;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.Locale;
 
 @Service
@@ -19,16 +22,19 @@ public class HostProbeCommandServiceImpl implements HostProbeCommandService {
 
     private final AmqpAdmin amqpAdmin;
     private final RabbitTemplate rabbitTemplate;
+    private final HostMapper hostMapper;
 
-    public HostProbeCommandServiceImpl(AmqpAdmin amqpAdmin, RabbitTemplate rabbitTemplate) {
+    public HostProbeCommandServiceImpl(AmqpAdmin amqpAdmin, RabbitTemplate rabbitTemplate, HostMapper hostMapper) {
         this.amqpAdmin = amqpAdmin;
         this.rabbitTemplate = rabbitTemplate;
+        this.hostMapper = hostMapper;
     }
 
     @Override
     public void sendAssetProbeCommand(HostAssetProbeCommand command) {
         HostAssetProbeCommand normalizedCommand = normalize(command);
         validate(normalizedCommand);
+        validateHostOnline(normalizedCommand.getMacAddress());
 
         amqpAdmin.declareExchange(new DirectExchange(AGENT_EXCHANGE, true, false));
         String message = JSON.toJSONString(normalizedCommand);
@@ -41,6 +47,7 @@ public class HostProbeCommandServiceImpl implements HostProbeCommandService {
         normalized.setService(toFlag(command == null ? null : command.getService()));
         normalized.setProcess(toFlag(command == null ? null : command.getProcess()));
         normalized.setApp(toFlag(command == null ? null : command.getApp()));
+        normalized.setHostName(command == null ? null : trimToNull(command.getHostName()));
         normalized.setMacAddress(normalizeMacAddress(command == null ? null : command.getMacAddress()));
         normalized.setType(ASSET_PROBE_TYPE);
         return normalized;
@@ -58,6 +65,21 @@ public class HostProbeCommandServiceImpl implements HostProbeCommandService {
         }
     }
 
+    private void validateHostOnline(String macAddress) {
+        Host host = hostMapper.selectByMacAddress(macAddress);
+        if (host == null) {
+            throw new BusinessException("Host not found");
+        }
+
+        LocalDateTime updatedAt = host.getUpdatedAt();
+        if (updatedAt == null || updatedAt.plusSeconds(4).isBefore(LocalDateTime.now())) {
+            hostMapper.updateStatusAndUpdatedAtByMacAddress(macAddress, "0");
+            throw new BusinessException("主机已下线");
+        }
+
+        hostMapper.updateStatusAndUpdatedAtByMacAddress(macAddress, "1");
+    }
+
     private Integer toFlag(Integer value) {
         return value != null && value == 1 ? 1 : 0;
     }
@@ -67,6 +89,14 @@ public class HostProbeCommandServiceImpl implements HostProbeCommandService {
             return null;
         }
         String normalized = macAddress.trim().replace(':', '-').toUpperCase(Locale.ROOT);
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
     }
 }

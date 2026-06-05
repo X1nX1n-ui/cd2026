@@ -9,6 +9,8 @@ spring:
     url: jdbc:mysql://127.0.0.1:3306/cd2026?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: root
     password: root
+    hikari:
+      initialization-fail-timeout: -1
   rabbitmq:
     host: 118.24.73.32
     port: 15333
@@ -21,7 +23,7 @@ spring:
         default-requeue-rejected: false
   sql:
     init:
-      mode: always
+      mode: never
       schema-locations: classpath:schema.sql
 
 mybatis:
@@ -32,6 +34,8 @@ mybatis:
 
 app:
   upload-dir: uploads
+  database:
+    initialize-on-startup: true
   jwt:
     secret: dGhyZWF0LWF3YXJlbmVzcy1wbGF0Zm9ybS1qd3Qtc2VjcmV0LWtleS0yMDI2LTA2LTAy
     expiration-seconds: 43200

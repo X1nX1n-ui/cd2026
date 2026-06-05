@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -49,8 +49,9 @@
         const canCreate = PlatformUtils.hasPermission("sys:permission:create");
         const canUpdate = PlatformUtils.hasPermission("sys:permission:update");
         const canDelete = PlatformUtils.hasPermission("sys:permission:delete");
-        let permissionOptions = [];
-        let permissionNameMap = {};
+        const permissionOptionsCacheKey = "page-permission-options-cache";
+        let permissionOptions = PlatformUtils.readSessionCache(permissionOptionsCacheKey, 5 * 60 * 1000) || [];
+        let permissionNameMap = buildPermissionNameMap(permissionOptions);
 
         init();
 
@@ -66,7 +67,7 @@
             }
             pageToolbar.innerHTML = '<button type="button" class="layui-btn page-btn" id="createPermissionButton">新增权限</button>';
             document.getElementById("createPermissionButton").addEventListener("click", function () {
-                loadPermissionOptions().then(function () {
+                ensurePermissionOptions().then(function () {
                     openPermissionDialog("新增权限");
                 });
             });
@@ -87,16 +88,23 @@
             return PlatformUtils.request("/api/permissions/options")
                 .then(function (data) {
                     permissionOptions = Array.isArray(data) ? data : [];
-                    permissionNameMap = {};
-                    permissionOptions.forEach(function (item) {
-                        permissionNameMap[item.id] = item.permissionName;
-                    });
+                    permissionNameMap = buildPermissionNameMap(permissionOptions);
+                    PlatformUtils.writeSessionCache(permissionOptionsCacheKey, permissionOptions);
                 })
                 .catch(function (error) {
                     permissionOptions = [];
                     permissionNameMap = {};
                     layer.msg(error.message || "权限选项加载失败");
                 });
+        }
+
+        function ensurePermissionOptions() {
+            if (permissionOptions.length) {
+                return Promise.resolve(permissionOptions);
+            }
+            return loadPermissionOptions().then(function () {
+                return permissionOptions;
+            });
         }
 
         function renderTable() {
@@ -131,13 +139,13 @@
                     {field: "routePath", title: "路由地址", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.routePath); }},
                     {field: "sortNo", title: "排序", width: 80},
                     {field: "visible", title: "显示", width: 80, templet: function (row) { return row.visible === 1 ? "是" : "否"; }},
-                    {title: "操作", width: 160, fixed: "right", templet: function () { return renderActions(); }}
+                    {title: "操作", width: 160, templet: function () { return renderActions(); }}
                 ]]
             });
 
             table.on("tool(permissionTable)", function (obj) {
                 if (obj.event === "edit") {
-                    loadPermissionOptions().then(function () {
+                    ensurePermissionOptions().then(function () {
                         openPermissionDialog("编辑权限", obj.data);
                     });
                 }
@@ -182,6 +190,14 @@
                 actions.push('<a class="layui-btn layui-btn-xs page-secondary-btn" lay-event="delete">删除</a>');
             }
             return actions.join("") || '<span class="table-empty-action">--</span>';
+        }
+
+        function buildPermissionNameMap(items) {
+            const map = {};
+            (Array.isArray(items) ? items : []).forEach(function (item) {
+                map[item.id] = item.permissionName;
+            });
+            return map;
         }
 
         function openPermissionDialog(title, permission) {
@@ -351,3 +367,5 @@
 </script>
 </body>
 </html>
+
+
