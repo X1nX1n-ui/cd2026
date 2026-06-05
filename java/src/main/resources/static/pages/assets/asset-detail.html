@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资产详情</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="app-body">
+<div class="page-shell">
+    <div class="page-section asset-detail-page">
+        <section class="page-heading">
+            <div>
+                <h1>资产详情</h1>
+                <p>集中查看账号、服务、进程和安装程序数据，重点展示大数组内容，便于排查和比对。</p>
+            </div>
+            <div class="page-toolbar">
+                <button type="button" class="layui-btn page-secondary-btn" id="refreshButton">刷新数据</button>
+            </div>
+        </section>
+
+        <section class="asset-detail-hero" id="assetHero"></section>
+
+        <section class="asset-detail-tabs">
+            <button type="button" class="asset-tab-button is-active" data-target="account">账号</button>
+            <button type="button" class="asset-tab-button" data-target="service">服务</button>
+            <button type="button" class="asset-tab-button" data-target="process">进程</button>
+            <button type="button" class="asset-tab-button" data-target="app">安装程序</button>
+        </section>
+
+        <section class="asset-detail-panels">
+            <div class="asset-detail-panel is-active" data-panel="account"></div>
+            <div class="asset-detail-panel" data-panel="service"></div>
+            <div class="asset-detail-panel" data-panel="process"></div>
+            <div class="asset-detail-panel" data-panel="app"></div>
+        </section>
+    </div>
+</div>
+
+<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
+<script src="/js/common.js"></script>
+<script>
+    layui.use(["layer"], function () {
+        const layer = layui.layer;
+        const refreshButton = document.getElementById("refreshButton");
+        const heroElement = document.getElementById("assetHero");
+        const tabButtons = Array.from(document.querySelectorAll(".asset-tab-button"));
+        const panels = Array.from(document.querySelectorAll(".asset-detail-panel"));
+        const hostId = new URLSearchParams(window.location.search).get("hostId");
+
+        if (!hostId) {
+            layer.msg("缺少主机 ID");
+            renderMissingState();
+            return;
+        }
+
+        bindEvents();
+        loadDetail();
+
+        function bindEvents() {
+            refreshButton.addEventListener("click", function () {
+                loadDetail();
+            });
+
+            tabButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    activatePanel(button.getAttribute("data-target"));
+                });
+            });
+        }
+
+        function loadDetail() {
+            PlatformUtils.request("/api/hosts/" + hostId + "/asset-detail")
+                .then(function (data) {
+                    renderHero(data.host || {});
+                    renderAssetPanel("account", "账号", data.account, {
+                        primaryCountLabel: "账号数量",
+                        primarySectionTitle: "账号列表",
+                        secondaryCountLabel: "影子账号数量",
+                        secondarySectionTitle: "影子账号"
+                    });
+                    renderAssetPanel("service", "服务", data.service, {
+                        primaryCountLabel: "服务数量",
+                        primarySectionTitle: "服务列表"
+                    });
+                    renderAssetPanel("process", "进程", data.process, {
+                        primaryCountLabel: "进程数量",
+                        primarySectionTitle: "进程列表"
+                    });
+                    renderAssetPanel("app", "安装程序", data.app, {
+                        primaryCountLabel: "安装程序数量",
+                        primarySectionTitle: "安装程序列表"
+                    });
+                })
+                .catch(function (error) {
+                    layer.msg(error.message || "获取资产详情失败");
+                    renderMissingState(error.message || "暂无可展示的数据");
+                });
+        }
+
+        function renderHero(host) {
+            heroElement.innerHTML = ''
+                + '<div class="asset-hero-main">'
+                + '<div class="asset-hero-eyebrow">主机资产视图</div>'
+                + '<h2>' + PlatformUtils.escapeHtml(host.hostname || "未命名主机") + '</h2>'
+                + '<p>' + PlatformUtils.escapeHtml(host.ipAddress || "--") + ' / ' + PlatformUtils.escapeHtml(host.macAddress || "--") + '</p>'
+                + '</div>'
+                + '<div class="asset-hero-meta">'
+                + renderMetricCard("主机状态", PlatformUtils.renderHostStatus(host.status), true)
+                + renderMetricCard("最后上报", PlatformUtils.formatDateTime(host.lastSeenAt))
+                + renderMetricCard("系统", host.osName || host.osDetail || "--")
+                + '</div>';
+        }
+
+        function renderAssetPanel(panelKey, panelLabel, snapshot, config) {
+            const panel = document.querySelector('[data-panel="' + panelKey + '"]');
+            if (!panel) {
+                return;
+            }
+
+            if (!snapshot) {
+                panel.innerHTML = renderEmptyAssetState(panelLabel);
+                return;
+            }
+
+            const primaryItems = parseJsonArray(snapshot.primaryPayload);
+            const secondaryItems = parseJsonArray(snapshot.secondaryPayload);
+            const rawPayload = prettyJson(snapshot.rawPayload);
+            const summaryCards = [
+                renderMetricCard(config.primaryCountLabel, snapshot.primaryCount),
+                renderMetricCard("更新时间", PlatformUtils.formatDateTime(snapshot.updatedAt)),
+                renderMetricCard("MAC", snapshot.macAddress || "--")
+            ];
+
+            if (config.secondaryCountLabel) {
+                summaryCards.splice(1, 0, renderMetricCard(config.secondaryCountLabel, snapshot.secondaryCount));
+            }
+
+            panel.innerHTML = ''
+                + '<div class="asset-section-head">'
+                + '<div>'
+                + '<h3>' + PlatformUtils.escapeHtml(panelLabel) + '</h3>'
+                + '<p>结构化展示当前主机的 ' + PlatformUtils.escapeHtml(panelLabel) + ' 数据。</p>'
+                + '</div>'
+                + '</div>'
+                + '<div class="asset-summary-grid">' + summaryCards.join("") + '</div>'
+                + renderArraySection(config.primarySectionTitle, primaryItems)
+                + (config.secondarySectionTitle ? renderArraySection(config.secondarySectionTitle, secondaryItems) : "")
+                + '<div class="asset-raw-block">'
+                + '<div class="asset-block-title">原始消息</div>'
+                + '<pre>' + PlatformUtils.escapeHtml(rawPayload) + '</pre>'
+                + '</div>';
+        }
+
+        function renderMetricCard(label, value, rawHtml) {
+            const renderedValue = rawHtml ? value : PlatformUtils.renderValue(value);
+            return '<div class="asset-summary-card">'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<strong>' + renderedValue + '</strong>'
+                + '</div>';
+        }
+
+        function renderArraySection(title, items) {
+            return ''
+                + '<div class="asset-array-section">'
+                + '<div class="asset-block-title">' + PlatformUtils.escapeHtml(title) + '</div>'
+                + (items.length ? renderArrayGrid(items) : '<div class="asset-empty-inline">暂无数据</div>')
+                + '</div>';
+        }
+
+        function renderArrayGrid(items) {
+            return '<div class="asset-array-grid">'
+                + items.map(function (item, index) {
+                    return renderObjectCard(index, item);
+                }).join("")
+                + '</div>';
+        }
+
+        function renderObjectCard(index, item) {
+            const entries = item && typeof item === "object" && !Array.isArray(item)
+                ? Object.entries(item)
+                : [["value", item]];
+            return '<article class="asset-object-card">'
+                + '<header>'
+                + '<span>第 ' + (index + 1) + ' 项</span>'
+                + '</header>'
+                + '<div class="asset-object-fields">'
+                + entries.map(function (entry) {
+                    return '<div class="asset-object-field">'
+                        + '<label>' + PlatformUtils.escapeHtml(entry[0]) + '</label>'
+                        + '<div>' + formatAnyValue(entry[1]) + '</div>'
+                        + '</div>';
+                }).join("")
+                + '</div>'
+                + '</article>';
+        }
+
+        function formatAnyValue(value) {
+            if (value === null || value === undefined || value === "") {
+                return '<span class="asset-value-muted">--</span>';
+            }
+            if (Array.isArray(value) || typeof value === "object") {
+                return '<pre class="asset-inline-pre">' + PlatformUtils.escapeHtml(JSON.stringify(value, null, 2)) + '</pre>';
+            }
+            if (typeof value === "boolean") {
+                return PlatformUtils.escapeHtml(value ? "true" : "false");
+            }
+            return PlatformUtils.escapeHtml(String(value));
+        }
+
+        function parseJsonArray(value) {
+            if (!value) {
+                return [];
+            }
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
+            }
+        }
+
+        function prettyJson(value) {
+            if (!value) {
+                return "--";
+            }
+            try {
+                return JSON.stringify(JSON.parse(value), null, 2);
+            } catch (error) {
+                return String(value);
+            }
+        }
+
+        function renderEmptyAssetState(label) {
+            return '<div class="asset-empty-card">'
+                + '<h3>' + PlatformUtils.escapeHtml(label) + '</h3>'
+                + '<p>当前还没有同步到该类资产数据，请等待主机上报后再刷新查看。</p>'
+                + '</div>';
+        }
+
+        function renderMissingState(message) {
+            heroElement.innerHTML = '<div class="asset-empty-card"><h3>资产详情</h3><p>' + PlatformUtils.escapeHtml(message || "暂无数据") + '</p></div>';
+            panels.forEach(function (panel) {
+                panel.innerHTML = "";
+            });
+        }
+
+        function activatePanel(panelKey) {
+            tabButtons.forEach(function (button) {
+                button.classList.toggle("is-active", button.getAttribute("data-target") === panelKey);
+            });
+            panels.forEach(function (panel) {
+                panel.classList.toggle("is-active", panel.getAttribute("data-panel") === panelKey);
+            });
+        }
+    });
+</script>
+</body>
+</html>
