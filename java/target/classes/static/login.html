@@ -94,6 +94,17 @@
             rememberInput.checked = !!remembered.rememberMe;
         }
 
+        // ??URL?????????????????
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlMessage = urlParams.get("message");
+        if (urlMessage) {
+            layer.msg(decodeURIComponent(urlMessage), {icon: 1, time: 3000});
+            // ??URL???????????
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
+
         form.render();
 
         form.on("submit(loginSubmit)", function (data) {

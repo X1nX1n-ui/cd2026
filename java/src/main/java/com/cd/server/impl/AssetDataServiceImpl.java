@@ -59,13 +59,6 @@ public class AssetDataServiceImpl implements AssetDataService {
                 INSERT INTO `accounts` (
                     mac_address, accounts, shadow_accounts, account_count, shadow_account_count, raw_payload
                 ) VALUES (?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    accounts = VALUES(accounts),
-                    shadow_accounts = VALUES(shadow_accounts),
-                    account_count = VALUES(account_count),
-                    shadow_account_count = VALUES(shadow_account_count),
-                    raw_payload = VALUES(raw_payload),
-                    updated_at = CURRENT_TIMESTAMP
                 """,
                 macAddress,
                 JSON.toJSONString(accounts),
@@ -90,11 +83,6 @@ public class AssetDataServiceImpl implements AssetDataService {
                 INSERT INTO `services` (
                     mac_address, services, service_count, raw_payload
                 ) VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    services = VALUES(services),
-                    service_count = VALUES(service_count),
-                    raw_payload = VALUES(raw_payload),
-                    updated_at = CURRENT_TIMESTAMP
                 """,
                 macAddress,
                 JSON.toJSONString(services),
@@ -117,11 +105,6 @@ public class AssetDataServiceImpl implements AssetDataService {
                 INSERT INTO `processes` (
                     mac_address, processes, process_count, raw_payload
                 ) VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    processes = VALUES(processes),
-                    process_count = VALUES(process_count),
-                    raw_payload = VALUES(raw_payload),
-                    updated_at = CURRENT_TIMESTAMP
                 """,
                 macAddress,
                 JSON.toJSONString(processes),
@@ -144,11 +127,6 @@ public class AssetDataServiceImpl implements AssetDataService {
                 INSERT INTO `apps` (
                     mac_address, apps, app_count, raw_payload
                 ) VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    apps = VALUES(apps),
-                    app_count = VALUES(app_count),
-                    raw_payload = VALUES(raw_payload),
-                    updated_at = CURRENT_TIMESTAMP
                 """,
                 macAddress,
                 JSON.toJSONString(apps),

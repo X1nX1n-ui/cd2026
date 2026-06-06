@@ -46,4 +46,18 @@ public interface UserMapper {
     long countAll();
 
     long countByStatus(@Param("userStatus") UserStatus userStatus);
+
+    int updatePassword(@Param("id") Long id, @Param("userPwd") String userPwd);
+
+    int updateEmailVerificationCode(@Param("id") Long id,
+                                     @Param("emailVerificationCode") String emailVerificationCode,
+                                     @Param("emailVerificationExpire") java.time.LocalDateTime emailVerificationExpire);
+
+    int clearEmailVerificationCode(@Param("id") Long id);
+
+    int recordPasswordChangeFailure(@Param("id") Long id,
+                                     @Param("passwordChangeFailures") Integer passwordChangeFailures,
+                                     @Param("passwordChangeLockedUntil") java.time.LocalDateTime passwordChangeLockedUntil);
+
+    int resetPasswordChangeFailures(@Param("id") Long id);
 }

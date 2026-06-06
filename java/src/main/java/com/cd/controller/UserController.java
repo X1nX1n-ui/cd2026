@@ -1,5 +1,6 @@
 package com.cd.controller;
 
+import com.cd.entity.ChangePasswordRequest;
 import com.cd.entity.PageResult;
 import com.cd.entity.User;
 import com.cd.entity.UserView;
@@ -26,6 +27,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -83,6 +86,29 @@ public class UserController {
     @PreAuthorize("hasAuthority('sys:user:delete')")
     public void delete(@PathVariable Long id) {
         userServer.deleteById(id);
+    }
+
+    @PostMapping("/current/password/send-code")
+    public Map<String, Object> sendPasswordChangeCode() {
+        userServer.sendPasswordChangeVerificationCode(SecurityUtils.currentUserId());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("message", "??????????????5?????");
+        return result;
+    }
+
+    @PostMapping("/current/password/change")
+    public Map<String, Object> changePassword(@RequestBody ChangePasswordRequest request) {
+        userServer.changePassword(
+                SecurityUtils.currentUserId(),
+                request.getOldPassword(),
+                request.getNewPassword(),
+                request.getVerificationCode()
+        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("message", "???????????");
+        return result;
     }
 
     @PostMapping("/current/avatar")

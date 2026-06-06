@@ -14,6 +14,10 @@ public class User {
     private UserStatus userStatus;
     private Integer failedAttempts;
     private LocalDateTime lockTime;
+    private String emailVerificationCode;
+    private LocalDateTime emailVerificationExpire;
+    private Integer passwordChangeFailures;
+    private LocalDateTime passwordChangeLockedUntil;
     private Integer deleted;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -90,6 +94,38 @@ public class User {
 
     public void setLockTime(LocalDateTime lockTime) {
         this.lockTime = lockTime;
+    }
+
+    public String getEmailVerificationCode() {
+        return emailVerificationCode;
+    }
+
+    public void setEmailVerificationCode(String emailVerificationCode) {
+        this.emailVerificationCode = emailVerificationCode;
+    }
+
+    public LocalDateTime getEmailVerificationExpire() {
+        return emailVerificationExpire;
+    }
+
+    public void setEmailVerificationExpire(LocalDateTime emailVerificationExpire) {
+        this.emailVerificationExpire = emailVerificationExpire;
+    }
+
+    public Integer getPasswordChangeFailures() {
+        return passwordChangeFailures;
+    }
+
+    public void setPasswordChangeFailures(Integer passwordChangeFailures) {
+        this.passwordChangeFailures = passwordChangeFailures;
+    }
+
+    public LocalDateTime getPasswordChangeLockedUntil() {
+        return passwordChangeLockedUntil;
+    }
+
+    public void setPasswordChangeLockedUntil(LocalDateTime passwordChangeLockedUntil) {
+        this.passwordChangeLockedUntil = passwordChangeLockedUntil;
     }
 
     public Integer getDeleted() {

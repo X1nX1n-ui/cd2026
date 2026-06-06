@@ -29,4 +29,19 @@ public interface UserServer {
     PageResult<com.cd.entity.LoginLog> loginLogPage(int pageNo, int pageSize, String userName);
 
     DashboardSummary getDashboardSummary();
+
+    /**
+     * ???????????????????
+     * @param userId ????ID
+     */
+    void sendPasswordChangeVerificationCode(Long userId);
+
+    /**
+     * ????
+     * @param userId ????ID
+     * @param oldPassword ???
+     * @param newPassword ???
+     * @param verificationCode ?????
+     */
+    void changePassword(Long userId, String oldPassword, String newPassword, String verificationCode);
 }

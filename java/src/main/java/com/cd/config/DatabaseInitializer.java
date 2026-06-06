@@ -35,6 +35,7 @@ public class DatabaseInitializer {
 
             try {
                 ensureBaseTables(jdbcTemplate);
+                normalizeAssetSnapshotIndexes(jdbcTemplate);
                 ensureUserColumns(jdbcTemplate);
                 normalizeExistingUsers(jdbcTemplate);
                 ensureAdminUser(jdbcTemplate);
@@ -225,6 +226,11 @@ public class DatabaseInitializer {
         boolean userStatusAdded = ensureUserColumn(jdbcTemplate, "user_status", "VARCHAR(16) NOT NULL DEFAULT 'NORMAL'");
         ensureUserColumn(jdbcTemplate, "failed_attempts", "INT NOT NULL DEFAULT 0");
         ensureUserColumn(jdbcTemplate, "lock_time", "DATETIME NULL");
+        ensureUserColumn(jdbcTemplate, "email_verification_code", "VARCHAR(6) NULL");
+        ensureUserColumn(jdbcTemplate, "email_verification_expire", "DATETIME NULL");
+        ensureUserColumn(jdbcTemplate, "password_change_failures", "INT NOT NULL DEFAULT 0");
+        ensureUserColumn(jdbcTemplate, "password_change_locked_until", "DATETIME NULL");
+        alterUserPwdColumnType(jdbcTemplate);
 
         if (userStatusAdded && hasUserColumn(jdbcTemplate, "status")) {
             jdbcTemplate.update("""
@@ -361,6 +367,22 @@ public class DatabaseInitializer {
         ensureUserRole(jdbcTemplate, getUserId(jdbcTemplate, "assetops"), analystRoleId);
     }
 
+    private void normalizeAssetSnapshotIndexes(JdbcTemplate jdbcTemplate) {
+        ensureAssetHistoryMode(jdbcTemplate, "accounts", "uk_accounts_mac_address", "idx_accounts_mac_address");
+        ensureAssetHistoryMode(jdbcTemplate, "services", "uk_services_mac_address", "idx_services_mac_address");
+        ensureAssetHistoryMode(jdbcTemplate, "processes", "uk_processes_mac_address", "idx_processes_mac_address");
+        ensureAssetHistoryMode(jdbcTemplate, "apps", "uk_apps_mac_address", "idx_apps_mac_address");
+    }
+
+    private void ensureAssetHistoryMode(JdbcTemplate jdbcTemplate, String tableName, String uniqueIndexName, String normalIndexName) {
+        if (hasIndex(jdbcTemplate, tableName, uniqueIndexName)) {
+            jdbcTemplate.execute("ALTER TABLE `" + tableName + "` DROP INDEX `" + uniqueIndexName + "`");
+        }
+        if (!hasIndex(jdbcTemplate, tableName, normalIndexName)) {
+            jdbcTemplate.execute("CREATE INDEX `" + normalIndexName + "` ON `" + tableName + "` (`mac_address`)");
+        }
+    }
+
     private void upsertUser(JdbcTemplate jdbcTemplate, String userName, String userPhone, String userEmail) {
         Integer count = jdbcTemplate.queryForObject("SELECT COUNT(1) FROM `user` WHERE user_name = ?", Integer.class, userName);
         if (count != null && count > 0) {
@@ -461,4 +483,23 @@ public class DatabaseInitializer {
         return count != null && count > 0;
     }
 
+    private boolean hasIndex(JdbcTemplate jdbcTemplate, String tableName, String indexName) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(1)
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = ?
+                  AND index_name = ?
+                """, Integer.class, tableName, indexName);
+        return count != null && count > 0;
+    }
+
+
+    private void alterUserPwdColumnType(JdbcTemplate jdbcTemplate) {
+        try {
+            jdbcTemplate.execute("ALTER TABLE user MODIFY COLUMN user_pwd VARCHAR(255) NOT NULL");
+        } catch (Exception ignored) {
+            // Column may already be VARCHAR(255)
+        }
+    }
 }

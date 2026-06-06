@@ -4,7 +4,7 @@ import com.cd.entity.Host;
 import com.cd.entity.HostAssetDetailView;
 import com.cd.entity.HostAssetProbeCommand;
 import com.cd.entity.PageResult;
-import com.cd.server.AccountAiAnalysisService;
+import com.cd.server.AssetAiAnalysisService;
 import com.cd.server.AssetSnapshotService;
 import com.cd.server.HostProbeCommandService;
 import com.cd.server.HostService;
@@ -30,16 +30,16 @@ public class HostController {
     private final HostService hostService;
     private final HostProbeCommandService hostProbeCommandService;
     private final AssetSnapshotService assetSnapshotService;
-    private final AccountAiAnalysisService accountAiAnalysisService;
+    private final AssetAiAnalysisService assetAiAnalysisService;
 
     public HostController(HostService hostService,
                           HostProbeCommandService hostProbeCommandService,
                           AssetSnapshotService assetSnapshotService,
-                          AccountAiAnalysisService accountAiAnalysisService) {
+                          AssetAiAnalysisService assetAiAnalysisService) {
         this.hostService = hostService;
         this.hostProbeCommandService = hostProbeCommandService;
         this.assetSnapshotService = assetSnapshotService;
-        this.accountAiAnalysisService = accountAiAnalysisService;
+        this.assetAiAnalysisService = assetAiAnalysisService;
     }
 
     @GetMapping("/page")
@@ -78,11 +78,32 @@ public class HostController {
         return assetSnapshotService.listByMacAddress(assetType, host.getMacAddress());
     }
 
-    @PostMapping("/{id}/asset-detail/account/analyze")
+    @PostMapping("/{id}/asset-detail/{assetType}/analyze")
     @PreAuthorize("hasAuthority('asset:host:view')")
-    public com.cd.entity.AssetSnapshotView analyzeAccountAsset(@PathVariable Long id) {
+    public com.cd.entity.AssetSnapshotView analyzeAsset(@PathVariable Long id,
+                                                        @PathVariable String assetType) {
         Host host = hostService.getById(id);
-        return accountAiAnalysisService.analyzeLatestAccountSnapshot(host);
+        return assetAiAnalysisService.analyzeLatestSnapshot(host, assetType);
+    }
+
+    @PostMapping("/{id}/asset-detail/{assetType}/analyze-task")
+    @PreAuthorize("hasAuthority('asset:host:view')")
+    public java.util.Map<String, Object> startAnalyzeAssetTask(@PathVariable Long id,
+                                                               @PathVariable String assetType) {
+        Host host = hostService.getById(id);
+        return assetAiAnalysisService.startAnalyzeLatestSnapshotTask(host, assetType);
+    }
+
+    @GetMapping("/asset-analyze-tasks/{taskId}")
+    @PreAuthorize("hasAuthority('asset:host:view')")
+    public java.util.Map<String, Object> getAnalyzeAssetTaskStatus(@PathVariable String taskId) {
+        return assetAiAnalysisService.getAnalyzeTaskStatus(taskId);
+    }
+
+    @PostMapping("/asset-risk-levels/normalize")
+    @PreAuthorize("hasAuthority('asset:host:view')")
+    public java.util.Map<String, Object> normalizeAssetRiskLevels(@RequestParam(required = false) String assetType) {
+        return assetAiAnalysisService.normalizeStoredRiskLevels(assetType);
     }
 
     @PostMapping

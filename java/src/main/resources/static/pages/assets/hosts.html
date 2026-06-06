@@ -558,9 +558,13 @@
                 + '<span>单击左侧记录查看详情，勾选两条记录后可以并排对比差异。</span>'
                 + '</div>'
                 + '<div class="asset-history-toolbar-actions">'
-                + (assetType === "account" ? '<button type="button" class="layui-btn page-btn asset-ai-analyze-trigger">AI辅助分析</button>' : '')
+                + '<button type="button" class="layui-btn page-btn asset-ai-analyze-trigger">AI辅助分析</button>'
                 + '<button type="button" class="layui-btn page-btn asset-compare-trigger" disabled>对比选中记录</button>'
                 + '<button type="button" class="layui-btn page-secondary-btn asset-compare-cancel" style="display:none;">退出对比</button>'
+                + '</div>'
+                + '<div class="asset-ai-progress" style="display:none;">'
+                + '<div class="asset-ai-progress-track"><span class="asset-ai-progress-bar" style="width:0%;"></span></div>'
+                + '<div class="asset-ai-progress-text">准备开始分析...</div>'
                 + '</div>'
                 + '</section>'
                 + '<section class="asset-history-layout">'
@@ -606,7 +610,7 @@
                 + '<label class="asset-history-item-check">'
                 + '<input type="checkbox" class="asset-compare-checkbox" value="' + PlatformUtils.escapeHtml(String(snapshot.id)) + '">'
                 + '<span>对比</span>'
-                + '</div>'
+                + '</label>'
                 + '</article>';
         }
 
@@ -616,14 +620,98 @@
                 snapshotMap[String(snapshot.id)] = snapshot;
             });
 
+            const shellElement = rootElement.querySelector(".asset-history-shell");
+            const assetType = shellElement ? (shellElement.getAttribute("data-asset-type") || "") : "";
             const stageContent = rootElement.querySelector(".asset-history-stage-content");
             const compareTrigger = rootElement.querySelector(".asset-compare-trigger");
             const compareCancel = rootElement.querySelector(".asset-compare-cancel");
             const analyzeTrigger = rootElement.querySelector(".asset-ai-analyze-trigger");
+            const progressBox = rootElement.querySelector(".asset-ai-progress");
+            const progressBar = rootElement.querySelector(".asset-ai-progress-bar");
+            const progressText = rootElement.querySelector(".asset-ai-progress-text");
             const historyItems = Array.from(rootElement.querySelectorAll(".asset-history-item"));
             const compareCheckboxes = Array.from(rootElement.querySelectorAll(".asset-compare-checkbox"));
             let currentRiskFilter = "all";
             let isAnalyzing = false;
+            let progressTimer = null;
+            let analyzeStatusPoller = null;
+
+            function setAnalyzeProgress(percent, text) {
+                if (progressBox) {
+                    progressBox.style.display = "grid";
+                }
+                if (progressBar) {
+                    progressBar.style.width = Math.max(0, Math.min(100, percent)) + "%";
+                }
+                if (progressText && text) {
+                    progressText.textContent = text;
+                }
+            }
+
+            function resetAnalyzeProgress(delayHide) {
+                if (progressTimer) {
+                    window.clearInterval(progressTimer);
+                    progressTimer = null;
+                }
+                if (analyzeStatusPoller) {
+                    window.clearTimeout(analyzeStatusPoller);
+                    analyzeStatusPoller = null;
+                }
+                window.setTimeout(function () {
+                    if (progressBox) {
+                        progressBox.style.display = "none";
+                    }
+                    if (progressBar) {
+                        progressBar.style.width = "0%";
+                    }
+                    if (progressText) {
+                        progressText.textContent = "准备开始分析...";
+                    }
+                }, delayHide || 0);
+            }
+
+            function finishAnalyzeFlow() {
+                isAnalyzing = false;
+                analyzeTrigger.disabled = false;
+                analyzeTrigger.textContent = "AI辅助分析";
+            }
+
+            function applyAnalyzeTaskStatus(taskStatus) {
+                if (!taskStatus) {
+                    return;
+                }
+                setAnalyzeProgress(taskStatus.progress || 0, taskStatus.stageText || "AI 正在分析...");
+                if (taskStatus.status === "success") {
+                    const normalizedSnapshot = taskStatus.result || null;
+                    layer.msg("AI 分析完成");
+                    currentRiskFilter = "all";
+                    if (normalizedSnapshot) {
+                        snapshotMap[String(normalizedSnapshot.id)] = normalizedSnapshot;
+                    }
+                    renderSnapshot(normalizedSnapshot);
+                    historyItems.forEach(function (node) {
+                        node.classList.toggle("is-active", String(node.getAttribute("data-snapshot-id")) === String(normalizedSnapshot && normalizedSnapshot.id));
+                    });
+                    finishAnalyzeFlow();
+                    resetAnalyzeProgress(1200);
+                    return;
+                }
+                if (taskStatus.status === "failed") {
+                    layer.msg(taskStatus.errorMessage || taskStatus.stageText || "AI 分析失败");
+                    finishAnalyzeFlow();
+                    resetAnalyzeProgress(1500);
+                    return;
+                }
+                analyzeStatusPoller = window.setTimeout(function () {
+                    PlatformUtils.request("/api/hosts/asset-analyze-tasks/" + encodeURIComponent(taskStatus.taskId))
+                        .then(applyAnalyzeTaskStatus)
+                        .catch(function (error) {
+                            layer.msg(error.message || "获取分析进度失败");
+                            finishAnalyzeFlow();
+                            resetAnalyzeProgress(1500);
+                        });
+                }, 1000);
+            }
 
             function syncCompareState() {
                 const checkedIds = compareCheckboxes
@@ -637,11 +725,9 @@
                 stageContent.innerHTML = snapshot
                     ? buildAssetSnapshotView(host, snapshot, assetMeta, currentRiskFilter)
                     : '<div class="asset-history-empty">未找到该条记录</div>';
-                if (assetMeta.label === "账号") {
-                    bindAccountRiskFilters(stageContent, snapshot, host, assetMeta, function (nextRiskFilter) {
-                        currentRiskFilter = nextRiskFilter;
-                    });
-                }
+                bindRiskFilters(stageContent, snapshot, host, assetMeta, function (nextRiskFilter) {
+                    currentRiskFilter = nextRiskFilter;
+                });
             }
 
             historyItems.forEach(function (item) {
@@ -706,28 +792,15 @@
                     isAnalyzing = true;
                     analyzeTrigger.disabled = true;
                     analyzeTrigger.textContent = "分析中...";
-                    PlatformUtils.request("/api/hosts/" + host.id + "/asset-detail/account/analyze", {
+                    setAnalyzeProgress(4, "正在创建分析任务...");
+                    PlatformUtils.request("/api/hosts/" + host.id + "/asset-detail/" + assetType + "/analyze-task", {
                         method: "POST"
                     })
-                        .then(function (latestSnapshot) {
-                            layer.msg("AI 分析完成");
-                            currentRiskFilter = "all";
-                            const normalizedSnapshot = latestSnapshot || null;
-                            if (normalizedSnapshot) {
-                                snapshotMap[String(normalizedSnapshot.id)] = normalizedSnapshot;
-                            }
-                            renderSnapshot(normalizedSnapshot);
-                            historyItems.forEach(function (node) {
-                                node.classList.toggle("is-active", String(node.getAttribute("data-snapshot-id")) === String(normalizedSnapshot && normalizedSnapshot.id));
-                            });
-                        })
+                        .then(applyAnalyzeTaskStatus)
                         .catch(function (error) {
                             layer.msg(error.message || "AI 分析失败");
-                        })
-                        .finally(function () {
-                            isAnalyzing = false;
-                            analyzeTrigger.disabled = false;
-                            analyzeTrigger.textContent = "AI辅助分析";
+                            finishAnalyzeFlow();
+                            resetAnalyzeProgress(1500);
                         });
                 });
             }
@@ -739,6 +812,7 @@
             const primaryItems = parseJsonArray(snapshot && snapshot.primaryPayload);
             const secondaryItems = parseJsonArray(snapshot && snapshot.secondaryPayload);
             const rawPayload = prettyJson(snapshot && snapshot.rawPayload);
+            const riskMode = hasRiskAnalysis(primaryItems, secondaryItems);
             const summaryCards = [
                 renderMetricCard(assetMeta.primaryCountLabel, snapshot && snapshot.primaryCount),
                 renderMetricCard("记录时间", snapshot ? PlatformUtils.formatDateTime(snapshot.createdAt) : "--")
@@ -750,23 +824,23 @@
             summaryCards.push(renderMetricCard("更新时间", snapshot ? PlatformUtils.formatDateTime(snapshot.updatedAt) : "--"));
 
             const normalizedRiskFilter = riskFilter || "all";
-            const filteredPrimaryItems = assetMeta.label === "账号" ? filterRiskItems(primaryItems, normalizedRiskFilter) : primaryItems;
-            const filteredSecondaryItems = assetMeta.label === "账号" ? filterRiskItems(secondaryItems, normalizedRiskFilter) : secondaryItems;
-            const riskStats = assetMeta.label === "账号" ? buildRiskStats(primaryItems, secondaryItems) : [];
+            const filteredPrimaryItems = riskMode ? filterRiskItems(primaryItems, normalizedRiskFilter) : primaryItems;
+            const filteredSecondaryItems = riskMode ? filterRiskItems(secondaryItems, normalizedRiskFilter) : secondaryItems;
+            const riskStats = riskMode ? buildRiskStats(primaryItems, secondaryItems, assetMeta.label) : [];
 
             return '<div class="asset-dialog-shell">'
                 + '<section class="asset-section-head asset-snapshot-head">'
                 + '<h3>记录 #' + PlatformUtils.escapeHtml(String(snapshot ? snapshot.id : "--")) + '</h3>'
                 + '<p>查看本次' + PlatformUtils.escapeHtml(assetMeta.label) + '采集结果的详细内容。</p>'
                 + '</section>'
-                + '<section class="asset-summary-grid' + (assetMeta.label === "账号" ? ' asset-account-summary-grid' : '') + '">' + summaryCards.join("") + riskStats.join("") + '</section>'
-                + (assetMeta.label === "账号" ? renderRiskFilterTabs(normalizedRiskFilter) : '')
-                + renderAssetSectionBlock(assetMeta.primarySectionTitle, filteredPrimaryItems, assetMeta.label === "账号" ? {
+                + '<section class="asset-summary-grid' + (riskMode ? ' asset-account-summary-grid' : '') + '">' + summaryCards.join("") + riskStats.join("") + '</section>'
+                + (riskMode ? renderRiskFilterTabs(normalizedRiskFilter) : '')
+                + renderAssetSectionBlock(assetMeta.primarySectionTitle, filteredPrimaryItems, riskMode ? {
                     totalCount: primaryItems.length,
                     filteredCount: filteredPrimaryItems.length,
                     riskMode: true
                 } : null)
-                + (assetMeta.secondarySectionTitle ? renderAssetSectionBlock(assetMeta.secondarySectionTitle, filteredSecondaryItems, assetMeta.label === "账号" ? {
+                + (assetMeta.secondarySectionTitle ? renderAssetSectionBlock(assetMeta.secondarySectionTitle, filteredSecondaryItems, riskMode ? {
                     totalCount: secondaryItems.length,
                     filteredCount: filteredSecondaryItems.length,
                     riskMode: true
@@ -804,7 +878,7 @@
                 + '<div class="asset-block-title">' + PlatformUtils.escapeHtml(title) + suffix + '</div>'
                 + '<span class="asset-block-count">共 ' + items.length + ' 条</span>'
                 + '</div>'
-                + (items.length ? renderArrayGrid(items, !!config.riskMode) : '<div class="asset-empty-inline">暂无数据</div>')
+                + (items.length ? renderArrayGrid(items, !!config.riskMode, title) : '<div class="asset-empty-inline">暂无数据</div>')
                 + '</section>';
         }
 
@@ -818,33 +892,144 @@
                 + '</section>';
         }
 
-        function renderArrayGrid(items, riskMode) {
+        function renderArrayGrid(items, riskMode, title) {
             return '<div class="asset-array-grid">'
                 + items.map(function (item, index) {
-                    return renderObjectCard(index, item, riskMode);
+                    return renderObjectCard(index, item, riskMode, title);
                 }).join("")
                 + '</div>';
         }
 
-        function renderObjectCard(index, item, riskMode) {
+        function renderObjectCard(index, item, riskMode, title) {
             const entries = item && typeof item === "object" && !Array.isArray(item)
                 ? Object.entries(item)
                 : [["value", item]];
-            const riskLevel = riskMode ? normalizeRiskLevel(item && item.risk_level) : "";
-            const riskBadge = riskLevel
-                ? '<span class="asset-risk-badge asset-risk-' + PlatformUtils.escapeHtml(riskLevel) + '">' + PlatformUtils.escapeHtml(getRiskDisplayLabel(riskLevel)) + '</span>'
-                : '';
+            const assetLabel = resolveAssetLabelByTitle(title);
+            const summaryHtml = renderAssetObjectSummary(item, assetLabel);
+            const sortedEntries = sortAssetEntries(entries, getPreferredFieldOrder(assetLabel));
             return '<article class="asset-object-card">'
-                + '<header><span>第 ' + (index + 1) + ' 项</span>' + riskBadge + '</header>'
+                + '<header><span>第 ' + (index + 1) + ' 项</span></header>'
+                + summaryHtml
                 + '<div class="asset-object-fields">'
-                + entries.map(function (entry) {
+                + sortedEntries.map(function (entry) {
                     return '<div class="asset-object-field">'
                         + '<label>' + PlatformUtils.escapeHtml(formatFieldLabel(entry[0])) + '</label>'
-                        + '<div>' + formatAnyValue(entry[1]) + '</div>'
+                        + '<div>' + formatFieldValue(entry[0], entry[1]) + '</div>'
                         + '</div>';
                 }).join("")
                 + '</div>'
                 + '</article>';
+        }
+
+        function resolveAssetLabelByTitle(title) {
+            if (title.indexOf("服务") >= 0) {
+                return "服务";
+            }
+            if (title.indexOf("进程") >= 0) {
+                return "进程";
+            }
+            if (title.indexOf("安装程序") >= 0 || title.indexOf("App") >= 0) {
+                return "安装程序";
+            }
+            if (title.indexOf("账号") >= 0) {
+                return "账号";
+            }
+            return "";
+        }
+
+        function renderAssetObjectSummary(item, assetLabel) {
+            if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return "";
+            }
+
+            const chips = [];
+            if (assetLabel === "服务") {
+                chips.push(renderSummaryChip("服务名", firstDefinedValue(item, ["Name", "name"])));
+                chips.push(renderSummaryChip("状态", firstDefinedValue(item, ["State", "state"])));
+                chips.push(renderSummaryChip("启动方式", firstDefinedValue(item, ["StartMode", "start_mode"])));
+                chips.push(renderSummaryChip("启动账户", firstDefinedValue(item, ["StartName", "start_name"])));
+            } else if (assetLabel === "进程") {
+                chips.push(renderSummaryChip("进程名", firstDefinedValue(item, ["Name", "name"])));
+                chips.push(renderSummaryChip("进程ID", firstDefinedValue(item, ["ProcessId", "process_id"])));
+                chips.push(renderSummaryChip("可执行路径", firstDefinedValue(item, ["ExecutablePath", "executable_path"])));
+            } else if (assetLabel === "安装程序") {
+                chips.push(renderSummaryChip("程序名", firstDefinedValue(item, ["name", "Name"])));
+                chips.push(renderSummaryChip("发布者", firstDefinedValue(item, ["publisher", "Publisher"])));
+                chips.push(renderSummaryChip("版本", firstDefinedValue(item, ["version", "Version"])));
+                chips.push(renderSummaryChip("安装时间", firstDefinedValue(item, ["install_date", "InstallDate"])));
+            } else if (assetLabel === "账号") {
+                chips.push(renderSummaryChip("账号名", firstDefinedValue(item, ["name", "Name"])));
+                chips.push(renderSummaryChip("启用状态", firstDefinedValue(item, ["enabled", "Enabled"])));
+                chips.push(renderSummaryChip("最后登录", firstDefinedValue(item, ["last_logon", "LastLogon"])));
+            }
+
+            const validChips = chips.filter(Boolean);
+            return validChips.length
+                ? '<section class="asset-object-summary">' + validChips.join("") + '</section>'
+                : "";
+        }
+
+        function renderSummaryChip(label, value) {
+            if (value === null || value === undefined || value === "") {
+                return "";
+            }
+            return '<div class="asset-summary-chip">'
+                + '<span>' + PlatformUtils.escapeHtml(label) + '</span>'
+                + '<strong>' + formatSummaryValue(value) + '</strong>'
+                + '</div>';
+        }
+
+        function formatSummaryValue(value) {
+            if (value === null || value === undefined || value === "") {
+                return '<span class="asset-value-muted">--</span>';
+            }
+            if (typeof value === "boolean") {
+                return PlatformUtils.escapeHtml(value ? "true" : "false");
+            }
+            return PlatformUtils.escapeHtml(String(value));
+        }
+
+        function firstDefinedValue(item, keys) {
+            for (let index = 0; index < keys.length; index += 1) {
+                const key = keys[index];
+                if (item[key] !== undefined && item[key] !== null && item[key] !== "") {
+                    return item[key];
+                }
+            }
+            return "";
+        }
+
+        function getPreferredFieldOrder(assetLabel) {
+            if (assetLabel === "服务") {
+                return ["Name", "DisplayName", "State", "StartMode", "StartName", "ProcessId", "risk_level", "result"];
+            }
+            if (assetLabel === "进程") {
+                return ["Name", "ProcessId", "ExecutablePath", "risk_level", "result"];
+            }
+            if (assetLabel === "安装程序") {
+                return ["name", "publisher", "version", "install_date", "risk_level", "result"];
+            }
+            if (assetLabel === "账号") {
+                return ["name", "enabled", "last_logon", "is_shadow_account", "risk_level", "result"];
+            }
+            return ["risk_level", "result"];
+        }
+
+        function sortAssetEntries(entries, preferredFields) {
+            const orderMap = {};
+            preferredFields.forEach(function (field, index) {
+                orderMap[field] = index;
+            });
+            return entries.slice().sort(function (left, right) {
+                const leftIndex = orderMap[left[0]];
+                const rightIndex = orderMap[right[0]];
+                const normalizedLeft = leftIndex === undefined ? Number.MAX_SAFE_INTEGER : leftIndex;
+                const normalizedRight = rightIndex === undefined ? Number.MAX_SAFE_INTEGER : rightIndex;
+                if (normalizedLeft !== normalizedRight) {
+                    return normalizedLeft - normalizedRight;
+                }
+                return String(left[0]).localeCompare(String(right[0]));
+            });
         }
 
         function renderMetricCard(label, value, rawHtml) {
@@ -872,7 +1057,7 @@
                 + '</div>';
         }
 
-        function buildRiskStats(primaryItems, secondaryItems) {
+        function buildRiskStats(primaryItems, secondaryItems, assetLabel) {
             const allItems = primaryItems.concat(secondaryItems);
             const buckets = {
                 high: 0,
@@ -887,10 +1072,10 @@
                 }
             });
             return [
-                renderRiskStatCard("高风险账号", buckets.high, "high"),
-                renderRiskStatCard("中风险账号", buckets.medium, "medium"),
-                renderRiskStatCard("低风险账号", buckets.low, "low"),
-                renderRiskStatCard("无风险账号", buckets.safe, "safe")
+                renderRiskStatCard("高风险" + assetLabel, buckets.high, "high"),
+                renderRiskStatCard("中风险" + assetLabel, buckets.medium, "medium"),
+                renderRiskStatCard("低风险" + assetLabel, buckets.low, "low"),
+                renderRiskStatCard("无风险" + assetLabel, buckets.safe, "safe")
             ];
         }
 
@@ -901,7 +1086,7 @@
                 + '</div>';
         }
 
-        function bindAccountRiskFilters(container, snapshot, host, assetMeta, onChange) {
+        function bindRiskFilters(container, snapshot, host, assetMeta, onChange) {
             Array.from(container.querySelectorAll("[data-risk-filter]")).forEach(function (button) {
                 button.addEventListener("click", function () {
                     const nextRiskFilter = button.getAttribute("data-risk-filter") || "all";
@@ -909,8 +1094,15 @@
                         onChange(nextRiskFilter);
                     }
                     container.innerHTML = buildAssetSnapshotView(host, snapshot, assetMeta, nextRiskFilter);
-                    bindAccountRiskFilters(container, snapshot, host, assetMeta, onChange);
+                    bindRiskFilters(container, snapshot, host, assetMeta, onChange);
                 });
+            });
+        }
+
+        function hasRiskAnalysis(primaryItems, secondaryItems) {
+            const allItems = (primaryItems || []).concat(secondaryItems || []);
+            return allItems.some(function (item) {
+                return !!resolveRiskLevel(item) || !!(item && item.result);
             });
         }
 
@@ -991,12 +1183,47 @@
         function formatFieldLabel(field) {
             const fieldMap = {
                 name: "账号名",
+                Name: "名称",
                 enabled: "启用状态",
+                Enabled: "启用状态",
                 full_name: "全名",
                 description: "描述",
                 sid: "SID",
                 last_logon: "最后登录时间",
                 is_shadow_account: "是否影子账号",
+                DisplayName: "显示名称",
+                State: "状态",
+                StartMode: "启动方式",
+                StartName: "启动账户",
+                ProcessId: "进程ID",
+                ExecutablePath: "可执行路径",
+                CommandLine: "命令行",
+                ParentProcessId: "父进程ID",
+                Company: "厂商",
+                Product: "产品",
+                ProductName: "产品名称",
+                Publisher: "发布者",
+                Version: "版本",
+                InstallDate: "安装日期",
+                InstallLocation: "安装位置",
+                UninstallString: "卸载命令",
+                Description: "说明",
+                Path: "路径",
+                display_name: "显示名称",
+                start_name: "启动账户",
+                start_mode: "启动方式",
+                state: "状态",
+                process_id: "进程ID",
+                parent_process_id: "父进程ID",
+                executable_path: "可执行路径",
+                command_line: "命令行",
+                company: "厂商",
+                product: "产品",
+                product_name: "产品名称",
+                publisher: "发布者",
+                version: "版本",
+                install_location: "安装位置",
+                install_date: "安装时间",
                 risk_level: "风险等级",
                 result: "分析结果"
             };
@@ -1007,8 +1234,8 @@
             if (value === null || value === undefined || value === "") {
                 return '<span class="asset-value-muted">--</span>';
             }
-            if (typeof value === "string" && value.indexOf("风险原因：") >= 0) {
-                return '<div class="asset-analysis-result">' + PlatformUtils.escapeHtml(value).replace(/\n/g, "<br>") + '</div>';
+            if (typeof value === "string" && (value.indexOf("风险原因") >= 0 || value.indexOf("加固建议") >= 0 || value.indexOf("建议：") >= 0)) {
+                return formatAnalysisResult(value);
             }
             if (Array.isArray(value) || typeof value === "object") {
                 return '<pre class="asset-inline-pre">' + PlatformUtils.escapeHtml(JSON.stringify(value, null, 2)) + '</pre>';
@@ -1017,6 +1244,56 @@
                 return PlatformUtils.escapeHtml(value ? "true" : "false");
             }
             return PlatformUtils.escapeHtml(String(value));
+        }
+
+        function formatFieldValue(field, value) {
+            if (field === "risk_level") {
+                const riskLevel = normalizeRiskLevel(value);
+                if (riskLevel) {
+                    return '<span class="asset-risk-badge asset-risk-' + PlatformUtils.escapeHtml(riskLevel) + '">'
+                        + PlatformUtils.escapeHtml(getRiskDisplayLabel(riskLevel))
+                        + '</span>';
+                }
+            }
+            return formatAnyValue(value);
+        }
+
+        function formatAnalysisResult(value) {
+            const raw = String(value || "").trim();
+            if (!raw) {
+                return '<span class="asset-value-muted">--</span>';
+            }
+
+            const normalized = raw.replace(/\r\n/g, "\n");
+            const reasonMatch = normalized.match(/风险原因[：:]\s*([\s\S]*?)(?=加固建议[：:]|建议[：:]|$)/);
+            const adviceMatch = normalized.match(/(?:加固建议|建议)[：:]\s*([\s\S]*)$/);
+
+            const reasonText = reasonMatch ? reasonMatch[1].trim() : "";
+            const adviceText = adviceMatch ? adviceMatch[1].trim() : "";
+
+            if (!reasonText && !adviceText) {
+                return '<div class="asset-analysis-result">'
+                    + '<div class="asset-analysis-section">'
+                    + '<strong>分析结果</strong>'
+                    + '<div>' + PlatformUtils.escapeHtml(raw).replace(/\n/g, "<br>") + '</div>'
+                    + '</div>'
+                    + '</div>';
+            }
+
+            return '<div class="asset-analysis-result">'
+                + (reasonText
+                    ? '<div class="asset-analysis-section">'
+                        + '<strong>风险原因</strong>'
+                        + '<div>' + PlatformUtils.escapeHtml(reasonText).replace(/\n/g, "<br>") + '</div>'
+                        + '</div>'
+                    : '')
+                + (adviceText
+                    ? '<div class="asset-analysis-section">'
+                        + '<strong>加固建议</strong>'
+                        + '<div>' + PlatformUtils.escapeHtml(adviceText).replace(/\n/g, "<br>") + '</div>'
+                        + '</div>'
+                    : '')
+                + '</div>';
         }
 
         function parseJsonArray(value) {

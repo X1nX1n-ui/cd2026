@@ -14,6 +14,10 @@
         <result property="userStatus" column="user_status" javaType="com.cd.entity.UserStatus"/>
         <result property="failedAttempts" column="failed_attempts"/>
         <result property="lockTime" column="lock_time"/>
+        <result property="emailVerificationCode" column="email_verification_code"/>
+        <result property="emailVerificationExpire" column="email_verification_expire"/>
+        <result property="passwordChangeFailures" column="password_change_failures"/>
+        <result property="passwordChangeLockedUntil" column="password_change_locked_until"/>
         <result property="deleted" column="deleted"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
@@ -27,7 +31,7 @@
     </resultMap>
 
     <sql id="BaseColumnList">
-        id, user_name, user_pwd, user_header, user_phone, user_email, user_status, failed_attempts, lock_time, deleted, created_at, updated_at, last_login_time
+        id, user_name, user_pwd, user_header, user_phone, user_email, user_status, failed_attempts, lock_time, email_verification_code, email_verification_expire, password_change_failures, password_change_locked_until, deleted, created_at, updated_at, last_login_time
     </sql>
 
     <select id="selectPage" resultMap="UserResultMap">
@@ -205,4 +209,43 @@
         WHERE deleted = 0
           AND user_status = #{userStatus}
     </select>
+
+    <update id="updatePassword">
+        UPDATE `user`
+        SET user_pwd = #{userPwd}
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="updateEmailVerificationCode">
+        UPDATE `user`
+        SET email_verification_code = #{emailVerificationCode},
+            email_verification_expire = #{emailVerificationExpire}
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="clearEmailVerificationCode">
+        UPDATE `user`
+        SET email_verification_code = NULL,
+            email_verification_expire = NULL
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="recordPasswordChangeFailure">
+        UPDATE `user`
+        SET password_change_failures = #{passwordChangeFailures},
+            password_change_locked_until = #{passwordChangeLockedUntil}
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
+
+    <update id="resetPasswordChangeFailures">
+        UPDATE `user`
+        SET password_change_failures = 0,
+            password_change_locked_until = NULL
+        WHERE id = #{id}
+          AND deleted = 0
+    </update>
 </mapper>

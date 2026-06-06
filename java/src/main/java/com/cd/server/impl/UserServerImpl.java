@@ -15,13 +15,19 @@ import com.cd.mapper.LoginLogMapper;
 import com.cd.mapper.PermissionMapper;
 import com.cd.mapper.RoleMapper;
 import com.cd.mapper.UserMapper;
+import com.cd.security.Argon2PasswordEncoder;
 import com.cd.security.Md5PasswordEncoder;
+import com.cd.server.EmailSenderService;
+import com.cd.server.EmailVerificationService;
 import com.cd.server.UserServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +37,8 @@ import java.util.Objects;
 @Service
 public class UserServerImpl implements UserServer {
 
+    private static final Logger log = LoggerFactory.getLogger(UserServerImpl.class);
+
     private static final String LOGIN_ERROR_MESSAGE = "用户名或密码错误，或账号已被锁定";
     private static final String LOGIN_SUCCESS_MESSAGE = "登录成功";
     private static final String DEFAULT_ADMIN_USER_NAME = "admin";
@@ -38,20 +46,33 @@ public class UserServerImpl implements UserServer {
     private static final int MAX_FAILED_ATTEMPTS = 5;
     private static final long FAILED_WINDOW_MINUTES = 10L;
     private static final long LOCK_DURATION_MINUTES = 30L;
+    private static final int PASSWORD_CHANGE_MAX_FAILURES = 5;
+    private static final long PASSWORD_CHANGE_LOCK_MINUTES = 15L;
+    private static final int PASSWORD_CONSECUTIVE_WARN_THRESHOLD = 3;
+    private static final long PASSWORD_CONSECUTIVE_COOLDOWN_HOURS = 1L;
+    private static final int VERIFICATION_CODE_LENGTH = 6;
+    private static final int VERIFICATION_CODE_EXPIRE_MINUTES = 5;
+    private static final String WEAK_PASSWORDS_PREFIX = "123456,password,admin123,111111,abc123";
 
     private final UserMapper userMapper;
     private final RoleMapper roleMapper;
     private final PermissionMapper permissionMapper;
     private final LoginLogMapper loginLogMapper;
+    private final EmailSenderService emailSenderService;
+    private final EmailVerificationService emailVerificationService;
 
     public UserServerImpl(UserMapper userMapper,
                           RoleMapper roleMapper,
                           PermissionMapper permissionMapper,
-                          LoginLogMapper loginLogMapper) {
+                          LoginLogMapper loginLogMapper,
+                          EmailSenderService emailSenderService,
+                          EmailVerificationService emailVerificationService) {
         this.userMapper = userMapper;
         this.roleMapper = roleMapper;
         this.permissionMapper = permissionMapper;
         this.loginLogMapper = loginLogMapper;
+        this.emailSenderService = emailSenderService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Override
@@ -204,8 +225,7 @@ public class UserServerImpl implements UserServer {
             throw new BusinessException(LOGIN_ERROR_MESSAGE);
         }
 
-        String encodedPassword = Md5PasswordEncoder.encode(password);
-        if (!passwordMatches(password, user.getUserPwd(), encodedPassword)) {
+        if (!verifyPassword(password, user.getUserPwd())) {
             recordLoginFailure(user, now);
             recordLoginLog(
                     user.getId(),
@@ -532,5 +552,211 @@ public class UserServerImpl implements UserServer {
 
     private String trimToEmpty(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    @Override
+    public void sendPasswordChangeVerificationCode(Long userId) {
+        LocalDateTime now = LocalDateTime.now();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new ResourceNotFoundException("??????id=" + userId);
+        }
+
+        String email = user.getUserEmail();
+        if (isBlank(email)) {
+            throw new BusinessException("?????????????????");
+        }
+
+        // ???????
+        if (user.getPasswordChangeLockedUntil() != null && user.getPasswordChangeLockedUntil().isAfter(now)) {
+            throw new BusinessException("??????????????15?????");
+        }
+
+        // ??6????
+        String code = generateVerificationCode();
+        LocalDateTime expireTime = now.plusMinutes(VERIFICATION_CODE_EXPIRE_MINUTES);
+
+        // ?????????
+        userMapper.updateEmailVerificationCode(userId, code, expireTime);
+
+                // 直接发送邮件\uff08同步\uff09
+        try {
+            emailSenderService.sendVerificationCode(email, code, VERIFICATION_CODE_EXPIRE_MINUTES);
+        } catch (Exception e) {
+            // ????????????
+            userMapper.clearEmailVerificationCode(userId);
+            throw new BusinessException("?????????????");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void changePassword(Long userId, String oldPassword, String newPassword, String verificationCode) {
+        LocalDateTime now = LocalDateTime.now();
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new ResourceNotFoundException("??????id=" + userId);
+        }
+
+        // 1. ??????????
+        if (user.getPasswordChangeLockedUntil() != null && user.getPasswordChangeLockedUntil().isAfter(now)) {
+            long remainingSeconds = java.time.Duration.between(now, user.getPasswordChangeLockedUntil()).getSeconds();
+            long remainingMinutes = (long) Math.ceil(remainingSeconds / 60.0);
+            throw new BusinessException("?????????????" + remainingMinutes + "?????");
+        }
+
+        // 2. ?????????????
+        int currentFailures = user.getPasswordChangeFailures() != null ? user.getPasswordChangeFailures() : 0;
+        if (currentFailures >= PASSWORD_CONSECUTIVE_WARN_THRESHOLD && user.getPasswordChangeLockedUntil() != null && user.getPasswordChangeLockedUntil().isAfter(now)) {
+            long remainingSeconds = java.time.Duration.between(now, user.getPasswordChangeLockedUntil()).getSeconds();
+            long remainingHours = (long) Math.ceil(remainingSeconds / 3600.0);
+            throw new BusinessException("??????" + PASSWORD_CONSECUTIVE_WARN_THRESHOLD + "????" + PASSWORD_CONSECUTIVE_COOLDOWN_HOURS + "????" + remainingHours + "?????");
+        }
+
+        // 3. ?????
+        if (!verifyPassword(oldPassword, user.getUserPwd())) {
+            recordPasswordChangeFailure(user, now);
+            int failures = currentFailures + 1;
+            if (failures >= PASSWORD_CHANGE_MAX_FAILURES) {
+                throw new BusinessException("??????????????????15??");
+            }
+            if (failures >= PASSWORD_CONSECUTIVE_WARN_THRESHOLD) {
+                throw new BusinessException("??????" + PASSWORD_CONSECUTIVE_WARN_THRESHOLD + "????" + PASSWORD_CONSECUTIVE_COOLDOWN_HOURS + "??");
+            }
+            throw new BusinessException("密码或验证码错误，请重试");
+        }
+
+        // 4. ???????
+        if (isBlank(verificationCode)) {
+            throw new BusinessException("????????");
+        }
+        if (isBlank(user.getEmailVerificationCode())) {
+            throw new BusinessException("?????????");
+        }
+        if (user.getEmailVerificationExpire() == null || user.getEmailVerificationExpire().isBefore(now)) {
+            userMapper.clearEmailVerificationCode(userId);
+            throw new BusinessException("密码或验证码错误，请重试");
+        }
+        if (!verificationCode.trim().equals(user.getEmailVerificationCode())) {
+            throw new BusinessException("?????????");
+        }
+
+        // 6. ??????????
+        if (verifyPassword(newPassword, user.getUserPwd())) {
+            throw new BusinessException("???????????");
+        }
+
+        // 6. ??????
+        validatePasswordStrength(newPassword);
+
+        // 7. ??Argon2id????
+        String hashedPassword = Argon2PasswordEncoder.encode(newPassword);
+
+        // 8. ??????????????????
+        userMapper.updatePassword(userId, hashedPassword);
+
+        log.info("????????, userId={}", userId);
+    }
+
+    /**
+     * ?????????R12????????+??+???????????
+     */
+    private void validatePasswordStrength(String password) {
+        if (isBlank(password)) {
+            throw new BusinessException("??????");
+        }
+
+        StringBuilder missing = new StringBuilder();
+
+        if (password.length() < 12) {
+            missing.append("?????12????");
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            missing.append("????????");
+        }
+        if (!password.matches(".*[a-z].*")) {
+            missing.append("????????");
+        }
+        if (!password.matches(".*[0-9].*")) {
+            missing.append("??????");
+        }
+        if (!password.matches(".*[^A-Za-z0-9].*")) {
+            missing.append("????????");
+        }
+
+        if (missing.length() > 0) {
+            String msg = missing.toString();
+            if (msg.endsWith("?")) {
+                msg = msg.substring(0, msg.length() - 1);
+            }
+            throw new BusinessException("???????" + msg);
+        }
+
+        // ????????
+        String lowerPassword = password.toLowerCase();
+        String[] weakWords = {"123456", "password", "admin123", "111111", "abc123", "qwerty", "iloveyou"};
+        for (String weak : weakWords) {
+            if (lowerPassword.contains(weak)) {
+                throw new BusinessException("???????????????");
+            }
+        }
+
+        // ?????????4?????????
+        for (int i = 0; i <= password.length() - 4; i++) {
+            char c = password.charAt(i);
+            if (c == password.charAt(i + 1) && c == password.charAt(i + 2) && c == password.charAt(i + 3)) {
+                throw new BusinessException("??????????????");
+            }
+        }
+    }
+
+    /**
+     * ???????Argon2id???MD5
+     */
+    private boolean verifyPassword(String rawPassword, String storedPassword) {
+        if (storedPassword == null || storedPassword.isBlank()) {
+            return false;
+        }
+        String normalizedStored = storedPassword.trim();
+
+        // ???Argon2id??
+        if (Argon2PasswordEncoder.isArgon2Hash(normalizedStored)) {
+            return Argon2PasswordEncoder.matches(normalizedStored, rawPassword);
+        }
+
+        // ????MD5
+        String encodedPassword = Md5PasswordEncoder.encode(rawPassword);
+        return encodedPassword.equalsIgnoreCase(normalizedStored) || rawPassword.equals(normalizedStored);
+    }
+
+    /**
+     * ????????
+     */
+    private void recordPasswordChangeFailure(User user, LocalDateTime now) {
+        int currentFailures = user.getPasswordChangeFailures() != null ? user.getPasswordChangeFailures() : 0;
+        int newFailures = currentFailures + 1;
+
+        if (newFailures >= PASSWORD_CHANGE_MAX_FAILURES) {
+            // ??5??????15??
+            LocalDateTime lockUntil = now.plusMinutes(PASSWORD_CHANGE_LOCK_MINUTES);
+            userMapper.recordPasswordChangeFailure(user.getId(), newFailures, lockUntil);
+        } else if (newFailures >= PASSWORD_CONSECUTIVE_WARN_THRESHOLD) {
+            // ??3????????1??
+            LocalDateTime lockUntil = now.plusHours(PASSWORD_CONSECUTIVE_COOLDOWN_HOURS);
+            userMapper.recordPasswordChangeFailure(user.getId(), newFailures, lockUntil);
+        } else {
+            userMapper.recordPasswordChangeFailure(user.getId(), newFailures, null);
+        }
+
+        user.setPasswordChangeFailures(newFailures);
+    }
+
+    /**
+     * ??6??????
+     */
+    private String generateVerificationCode() {
+        SecureRandom random = new SecureRandom();
+        int code = random.nextInt(900000) + 100000;
+        return String.valueOf(code);
     }
 }

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `test` (
+CREATE TABLE IF NOT EXISTS 	est (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(64) NOT NULL,
     remark VARCHAR(255) NULL,
@@ -6,16 +6,20 @@ CREATE TABLE IF NOT EXISTS `test` (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `user` (
+CREATE TABLE IF NOT EXISTS user (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_name VARCHAR(64) NOT NULL,
-    user_pwd VARCHAR(32) NOT NULL,
+    user_pwd VARCHAR(255) NOT NULL,
     user_header VARCHAR(255) NULL,
     user_phone VARCHAR(32) NULL,
     user_email VARCHAR(128) NULL,
     user_status VARCHAR(16) NOT NULL DEFAULT 'NORMAL',
     failed_attempts INT NOT NULL DEFAULT 0,
     lock_time DATETIME NULL,
+    email_verification_code VARCHAR(6) NULL,
+    email_verification_expire DATETIME NULL,
+    password_change_failures INT NOT NULL DEFAULT 0,
+    password_change_locked_until DATETIME NULL,
     deleted TINYINT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -25,7 +29,7 @@ CREATE TABLE IF NOT EXISTS `user` (
     UNIQUE KEY uk_user_user_email (user_email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `login_log` (
+CREATE TABLE IF NOT EXISTS login_log (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NULL,
     user_name VARCHAR(64) NOT NULL,
@@ -37,7 +41,8 @@ CREATE TABLE IF NOT EXISTS `login_log` (
     KEY idx_login_log_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `role` (
+CREATE TABLE IF NOT EXISTS 
+ole (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     role_name VARCHAR(64) NOT NULL,
     role_code VARCHAR(64) NOT NULL,
@@ -48,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `role` (
     UNIQUE KEY uk_role_role_code (role_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `permission` (
+CREATE TABLE IF NOT EXISTS permission (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     permission_name VARCHAR(64) NOT NULL,
     permission_code VARCHAR(64) NOT NULL,
@@ -67,7 +72,7 @@ CREATE TABLE IF NOT EXISTS `permission` (
     KEY idx_permission_parent_id (parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `user_role` (
+CREATE TABLE IF NOT EXISTS user_role (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
     role_id BIGINT NOT NULL,
@@ -76,7 +81,8 @@ CREATE TABLE IF NOT EXISTS `user_role` (
     KEY idx_user_role_role_id (role_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `role_permission` (
+CREATE TABLE IF NOT EXISTS 
+ole_permission (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     role_id BIGINT NOT NULL,
     permission_id BIGINT NOT NULL,
@@ -85,7 +91,7 @@ CREATE TABLE IF NOT EXISTS `role_permission` (
     KEY idx_role_permission_permission_id (permission_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS `hosts` (
+CREATE TABLE IF NOT EXISTS hosts (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     hostname VARCHAR(128) NOT NULL,
     ip_address VARCHAR(64) NULL,
@@ -113,7 +119,7 @@ CREATE TABLE IF NOT EXISTS `hosts` (
     KEY idx_hosts_last_seen_at (last_seen_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO `user` (
+INSERT INTO user (
     user_name,
     user_pwd,
     user_header,
@@ -137,5 +143,5 @@ SELECT
     0,
     NULL
 WHERE NOT EXISTS (
-    SELECT 1 FROM `user` WHERE user_name = 'admin'
+    SELECT 1 FROM user WHERE user_name = 'admin'
 );
