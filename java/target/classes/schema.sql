@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS 	est (
+﻿CREATE TABLE IF NOT EXISTS 	est (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(64) NOT NULL,
     remark VARCHAR(255) NULL,
@@ -106,9 +106,8 @@ CREATE TABLE IF NOT EXISTS hosts (
     os_type VARCHAR(64) NULL,
     os_version VARCHAR(128) NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+    os_build VARCHAR(128) NULL,
     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    source_queue VARCHAR(64) NULL,
-    raw_payload TEXT NULL,
     deleted TINYINT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -145,3 +144,50 @@ SELECT
 WHERE NOT EXISTS (
     SELECT 1 FROM user WHERE user_name = 'admin'
 );
+
+CREATE TABLE IF NOT EXISTS probe_schedule_config (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    cron_expression VARCHAR(64) NOT NULL DEFAULT '0 */5 * * * ?',
+    target_type VARCHAR(32) NOT NULL DEFAULT 'all_online',
+    target_host_ids TEXT NULL,
+    probe_account TINYINT(1) NOT NULL DEFAULT 1,
+    probe_service TINYINT(1) NOT NULL DEFAULT 1,
+    probe_process TINYINT(1) NOT NULL DEFAULT 1,
+    probe_app TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS installed_patch (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    mac_address VARCHAR(64) NOT NULL,
+    patch_id VARCHAR(128) NOT NULL,
+    patch_type VARCHAR(64) NULL,
+    product_name VARCHAR(255) NULL,
+    product_version VARCHAR(128) NULL,
+    install_time DATETIME NULL,
+    install_status VARCHAR(32) NULL,
+    source VARCHAR(64) NULL,
+    signature_status VARCHAR(32) NULL,
+    reboot_required TINYINT(1) NULL,
+    superseded_by VARCHAR(128) NULL,
+    is_security_patch TINYINT(1) NULL,
+    raw_data TEXT NULL,
+    scan_time DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_installed_patch_mac_address (mac_address),
+    KEY idx_installed_patch_patch_id (patch_id),
+    KEY idx_installed_patch_scan_time (scan_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS patch_scan_strategy (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    cron_expression VARCHAR(64) NOT NULL DEFAULT '0 0 */6 * * ?',
+    target_type VARCHAR(32) NOT NULL DEFAULT 'all_online',
+    target_host_ids TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

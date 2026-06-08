@@ -79,7 +79,7 @@ public class HostController {
     }
 
     @PostMapping("/{id}/asset-detail/{assetType}/analyze")
-    @PreAuthorize("hasAuthority('asset:host:view')")
+    @PreAuthorize("hasAnyAuthority('asset:host:view','asset:host:analyze')")
     public com.cd.entity.AssetSnapshotView analyzeAsset(@PathVariable Long id,
                                                         @PathVariable String assetType) {
         Host host = hostService.getById(id);
@@ -87,7 +87,7 @@ public class HostController {
     }
 
     @PostMapping("/{id}/asset-detail/{assetType}/analyze-task")
-    @PreAuthorize("hasAuthority('asset:host:view')")
+    @PreAuthorize("hasAnyAuthority('asset:host:view','asset:host:analyze')")
     public java.util.Map<String, Object> startAnalyzeAssetTask(@PathVariable Long id,
                                                                @PathVariable String assetType) {
         Host host = hostService.getById(id);
@@ -95,13 +95,13 @@ public class HostController {
     }
 
     @GetMapping("/asset-analyze-tasks/{taskId}")
-    @PreAuthorize("hasAuthority('asset:host:view')")
+    @PreAuthorize("hasAnyAuthority('asset:host:view','asset:host:analyze')")
     public java.util.Map<String, Object> getAnalyzeAssetTaskStatus(@PathVariable String taskId) {
         return assetAiAnalysisService.getAnalyzeTaskStatus(taskId);
     }
 
     @PostMapping("/asset-risk-levels/normalize")
-    @PreAuthorize("hasAuthority('asset:host:view')")
+    @PreAuthorize("hasAnyAuthority('asset:host:view','asset:host:analyze')")
     public java.util.Map<String, Object> normalizeAssetRiskLevels(@RequestParam(required = false) String assetType) {
         return assetAiAnalysisService.normalizeStoredRiskLevels(assetType);
     }
@@ -129,7 +129,7 @@ public class HostController {
 
     @PostMapping("/{id}/asset-probe")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAuthority('asset:host:view')")
+    @PreAuthorize("hasAnyAuthority('asset:host:view','asset:host:probe')")
     public void sendAssetProbeCommand(@PathVariable Long id, @RequestBody HostAssetProbeCommand command) {
         Host host = hostService.getById(id);
         command.setHostName(host.getHostname());

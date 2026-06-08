@@ -3,8 +3,13 @@ package com.cd.mq;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.cd.entity.Host;
+import com.cd.entity.InstalledPatch;
 import com.cd.server.AssetDataService;
 import com.cd.server.HostService;
+import com.cd.server.PatchScanService;
+import com.cd.server.impl.PatchScanServiceImpl;
+import com.cd.server.PatchSecurityRuleEngine;
+import com.cd.mapper.HostMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.AmqpAdmin;
@@ -19,6 +24,8 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.ArrayList;
 
 @Component
 public class RabbitMqHostListener {
@@ -39,15 +46,25 @@ public class RabbitMqHostListener {
     private static final String SERVICE_QUEUE = "asset_service_queue";
     private static final String PROCESS_QUEUE = "asset_process_queue";
     private static final String APP_QUEUE = "asset_app_queue";
+    private static final String HOTFIX_QUEUE = "hotfix_queue";
+    private static final String HOTFIX_ROUTING_KEY = "hotfix";
 
     private final HostService hostService;
+    private final PatchScanService patchScanService;
+    private final PatchSecurityRuleEngine patchRuleEngine;
+    private final HostMapper hostMapper;
     private final AssetDataService assetDataService;
+    private final PatchScanServiceImpl patchScanServiceImpl;
     private final AmqpAdmin amqpAdmin;
 
-    public RabbitMqHostListener(HostService hostService, AssetDataService assetDataService, AmqpAdmin amqpAdmin) {
+    public RabbitMqHostListener(HostService hostService, PatchScanService patchScanService, AssetDataService assetDataService, AmqpAdmin amqpAdmin, PatchSecurityRuleEngine patchRuleEngine, HostMapper hostMapper) {
         this.hostService = hostService;
+        this.patchScanService = patchScanService;
+        this.patchScanServiceImpl = (PatchScanServiceImpl) patchScanService;
         this.assetDataService = assetDataService;
         this.amqpAdmin = amqpAdmin;
+        this.patchRuleEngine = patchRuleEngine;
+        this.hostMapper = hostMapper;
     }
 
     @RabbitListener(
@@ -76,10 +93,9 @@ public class RabbitMqHostListener {
         host.setOsName(jsonObject.getString("os_name"));
         host.setOsType(jsonObject.getString("os_type"));
         host.setOsVersion(jsonObject.getString("os_version"));
+        host.setOsBuild(jsonObject.getString("os_build"));
         host.setStatus("ONLINE");
         host.setLastSeenAt(LocalDateTime.now());
-        host.setSourceQueue(SYSINFO_QUEUE);
-        host.setRawPayload(payload);
 
         hostService.saveOrUpdateFromQueue(host);
         log.info("Consumed sysinfo message for mac={}", host.getMacAddress());
@@ -140,6 +156,87 @@ public class RabbitMqHostListener {
 
     @RabbitListener(
         bindings = @QueueBinding(
+            value = @Queue(name = HOTFIX_QUEUE, durable = "true"),
+            exchange = @Exchange(name = SYSINFO_EXCHANGE, type = ExchangeTypes.DIRECT, durable = "true"),
+            key = HOTFIX_ROUTING_KEY
+        )
+    )
+    public void onHotfixMessage(String payload) {
+        log.info("[HOTFIX-CONSUMER] ========== Received hotfix message from MQ ==========");
+        JSONObject jsonObject = JSON.parseObject(normalizePayload(payload));
+        String macAddress = normalizeMacAddress(jsonObject.getString("mac_address"));
+        log.info("[HOTFIX-CONSUMER] Parsed MAC address: {}", macAddress);
+        if (macAddress == null || macAddress.isBlank()) {
+            log.warn("[HOTFIX-CONSUMER] Ignored hotfix message without mac_address");
+            return;
+        }
+
+        List<InstalledPatch> patches = new ArrayList<>();
+        com.alibaba.fastjson.JSONArray hotfixes = jsonObject.getJSONArray("hotfixes");
+        if (hotfixes != null) {
+            for (int i = 0; i < hotfixes.size(); i++) {
+                JSONObject hp = hotfixes.getJSONObject(i);
+                InstalledPatch patch = new InstalledPatch();
+                patch.setMacAddress(macAddress);
+                patch.setPatchId(hp.getString("patch_id"));
+                patch.setPatchType(hp.getString("patch_type"));
+                patch.setProductName(hp.getString("product_name"));
+                patch.setProductVersion(hp.getString("product_version"));
+                String installTime = hp.getString("install_time");
+                if (installTime != null && !installTime.isEmpty()) {
+                    try { patch.setInstallTime(LocalDateTime.parse(installTime)); } catch (Exception ignored) {}
+                }
+                patch.setInstallStatus(hp.getString("install_status"));
+                patch.setSource(hp.getString("source"));
+                patch.setSignatureStatus(hp.getString("signature_status"));
+                patch.setRebootRequired(hp.getInteger("reboot_required"));
+                patch.setSupersededBy(hp.getString("superseded_by"));
+                patch.setIsSecurityPatch(hp.getInteger("is_security_patch"));
+                patch.setRawData(hp.toJSONString());
+                patch.setScanTime(LocalDateTime.now());
+                patches.add(patch);
+            }
+        }
+        patchScanService.savePatchResults(macAddress, patches);
+        patchScanServiceImpl.updateLatestTask("PATCHES_RECEIVED", "补丁数据已入库: " + patches.size() + " 条", 50, patches.size());
+        log.info("[HOTFIX-CONSUMER] Saved {} patches to DB for mac={}", patches.size(), macAddress);
+
+        // Auto-trigger patch security analysis
+        patchScanServiceImpl.updateLatestTask("ANALYZING", "正在执行安全规则分析...", 60, patches.size());
+        try {
+            Host host = hostMapper.selectByMacAddress(macAddress);
+            if (host == null) {
+                log.warn("[HOTFIX-CONSUMER] selectByMacAddress returned null for mac={}, trying fallback", macAddress);
+                // Fallback: try online hosts
+                var onlineHosts = hostMapper.selectOnlineHosts();
+                for (var h : onlineHosts) {
+                    String hmac = h.getMacAddress();
+                    if (hmac != null && (hmac.equalsIgnoreCase(macAddress) || hmac.replace("-","").equalsIgnoreCase(macAddress.replace("-","")))) {
+                        host = h;
+                        log.info("[HOTFIX-CONSUMER] Found host via fallback: id={} hostname={}", host.getId(), host.getHostname());
+                        break;
+                    }
+                }
+            }
+            if (host != null) {
+                log.info("[HOTFIX-CONSUMER] Triggering auto patch analysis for host={}", host.getHostname());
+                patchRuleEngine.analyzeAndPersist(host);
+                patchScanServiceImpl.updateLatestTask("COMPLETED", "分析完成", 100, patches.size());
+                log.info("[HOTFIX-CONSUMER] Auto-analysis completed for host={}", host.getHostname());
+            } else {
+                log.warn("[HOTFIX-CONSUMER] No host found for mac={}, skipping analysis", macAddress);
+                patchScanServiceImpl.updateLatestTask("FAILED", "未找到对应主机: " + macAddress, 60, patches.size());
+            }
+        } catch (Exception e) {
+            log.error("[HOTFIX-CONSUMER] Auto-analysis failed for mac={}: {}", macAddress, e.getMessage(), e);
+            patchScanServiceImpl.updateLatestTask("FAILED", "分析失败: " + e.getMessage(), 60, patches.size());
+        }
+
+        log.info("[HOTFIX-CONSUMER] ========== Hotfix message processing complete ==========");
+    }
+
+    @RabbitListener(
+        bindings = @QueueBinding(
             value = @Queue(name = APP_QUEUE, durable = "true"),
             exchange = @Exchange(name = SYSINFO_EXCHANGE, type = ExchangeTypes.DIRECT, durable = "true"),
             key = APP_ROUTING_KEY
@@ -193,7 +290,7 @@ public class RabbitMqHostListener {
         if (payload == null) {
             return "{}";
         }
-        return payload.replace('\'', '"');
+        return payload;
     }
 
     private void handleAssetMessage(String payload, String assetType) {

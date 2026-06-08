@@ -18,4 +18,6 @@ public interface HostService {
     Host saveOrUpdateFromQueue(Host host);
 
     boolean updateHeartbeatStatusByMacAddress(String macAddress);
+
+    java.util.List<Host> listOnlineHosts();
 }

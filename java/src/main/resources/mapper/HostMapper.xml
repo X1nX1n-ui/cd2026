@@ -18,10 +18,9 @@
         <result property="osName" column="os_name"/>
         <result property="osType" column="os_type"/>
         <result property="osVersion" column="os_version"/>
+        <result property="osBuild" column="os_build"/>
         <result property="status" column="status"/>
         <result property="lastSeenAt" column="last_seen_at"/>
-        <result property="sourceQueue" column="source_queue"/>
-        <result property="rawPayload" column="raw_payload"/>
         <result property="deleted" column="deleted"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
@@ -29,8 +28,8 @@
 
     <sql id="BaseColumns">
         id, hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
-        memory_available, memory_total, os_detail, os_name, os_type, os_version, status,
-        last_seen_at, source_queue, raw_payload, deleted, created_at, updated_at
+        memory_available, memory_total, os_detail, os_name, os_type, os_version, os_build, status,
+        last_seen_at, deleted, created_at, updated_at
     </sql>
 
     <select id="count" resultType="long">
@@ -97,12 +96,12 @@
     <insert id="insert" parameterType="com.cd.entity.Host" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO `hosts` (
             hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
-            memory_available, memory_total, os_detail, os_name, os_type, os_version,
-            status, last_seen_at, source_queue, raw_payload, deleted
+            memory_available, memory_total, os_detail, os_name, os_type, os_version, os_build,
+            status, last_seen_at, deleted
         ) VALUES (
             #{hostname}, #{ipAddress}, #{macAddress}, #{cpuArchitecture}, #{cpuName}, #{logicalCores},
-            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion},
-            #{status}, #{lastSeenAt}, #{sourceQueue}, #{rawPayload}, 0
+            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion}, #{osBuild},
+            #{status}, #{lastSeenAt}, 0
         )
     </insert>
 
@@ -120,10 +119,9 @@
             os_name = #{osName},
             os_type = #{osType},
             os_version = #{osVersion},
+            os_build = #{osBuild},
             status = #{status},
             last_seen_at = #{lastSeenAt},
-            source_queue = #{sourceQueue},
-            raw_payload = #{rawPayload},
             deleted = 0
         WHERE id = #{id}
           AND deleted = 0
@@ -132,12 +130,12 @@
     <insert id="upsertByMacAddress" parameterType="com.cd.entity.Host">
         INSERT INTO `hosts` (
             hostname, ip_address, mac_address, cpu_architecture, cpu_name, logical_cores,
-            memory_available, memory_total, os_detail, os_name, os_type, os_version,
-            status, last_seen_at, source_queue, raw_payload, deleted
+            memory_available, memory_total, os_detail, os_name, os_type, os_version, os_build,
+            status, last_seen_at, deleted
         ) VALUES (
             #{hostname}, #{ipAddress}, #{macAddress}, #{cpuArchitecture}, #{cpuName}, #{logicalCores},
-            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion},
-            #{status}, #{lastSeenAt}, #{sourceQueue}, #{rawPayload}, 0
+            #{memoryAvailable}, #{memoryTotal}, #{osDetail}, #{osName}, #{osType}, #{osVersion}, #{osBuild},
+            #{status}, #{lastSeenAt}, 0
         )
         ON DUPLICATE KEY UPDATE
             hostname = VALUES(hostname),
@@ -151,10 +149,9 @@
             os_name = VALUES(os_name),
             os_type = VALUES(os_type),
             os_version = VALUES(os_version),
+            os_build = VALUES(os_build),
             status = VALUES(status),
             last_seen_at = VALUES(last_seen_at),
-            source_queue = VALUES(source_queue),
-            raw_payload = VALUES(raw_payload),
             deleted = 0
     </insert>
 
@@ -172,4 +169,11 @@
         WHERE id = #{id}
           AND deleted = 0
     </update>
+    <select id="selectOnlineHosts" resultMap="HostResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `hosts`
+        WHERE deleted = 0
+          AND status = '1'
+        ORDER BY updated_at DESC
+    </select>
 </mapper>

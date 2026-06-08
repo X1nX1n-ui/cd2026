@@ -1,0 +1,132 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.PatchSecurityResultMapper">
+
+    <resultMap id="ResultMap" type="com.cd.entity.PatchSecurityResultEntity">
+        <id column="id" property="id"/>
+        <result column="host_id" property="hostId"/>
+        <result column="mac_address" property="macAddress"/>
+        <result column="risk_score" property="riskScore"/>
+        <result column="risk_level" property="riskLevel"/>
+        <result column="risk_count" property="riskCount"/>
+        <result column="critical_count" property="criticalCount"/>
+        <result column="high_count" property="highCount"/>
+        <result column="medium_count" property="mediumCount"/>
+        <result column="low_count" property="lowCount"/>
+        <result column="ai_summary" property="aiSummary"/>
+        <result column="analyzed_at" property="analyzedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="hostname" property="hostName"/>
+        <result column="ip_address" property="ipAddress"/>
+        <result column="os_name" property="osName"/>
+        <result column="os_version" property="osVersion"/>
+        <result column="status" property="status"/>
+    </resultMap>
+
+    <resultMap id="RiskMap" type="com.cd.entity.PatchSecurityRiskEntity">
+        <id column="id" property="id"/>
+        <result column="result_id" property="resultId"/>
+        <result column="host_id" property="hostId"/>
+        <result column="risk_type" property="riskType"/>
+        <result column="severity" property="severity"/>
+        <result column="title" property="title"/>
+        <result column="description" property="description"/>
+        <result column="evidence" property="evidence"/>
+        <result column="recommendation" property="recommendation"/>
+        <result column="related_patches" property="relatedPatches"/>
+        <result column="related_cves" property="relatedCves"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="upsertResult">
+        INSERT INTO patch_security_result
+            (host_id, mac_address, risk_score, risk_level, risk_count,
+             critical_count, high_count, medium_count, low_count,
+             ai_summary, analyzed_at)
+        VALUES
+            (#{hostId}, #{macAddress}, #{riskScore}, #{riskLevel}, #{riskCount},
+             #{criticalCount}, #{highCount}, #{mediumCount}, #{lowCount},
+             #{aiSummary}, NOW())
+        ON DUPLICATE KEY UPDATE
+            mac_address = VALUES(mac_address),
+            risk_score = VALUES(risk_score),
+            risk_level = VALUES(risk_level),
+            risk_count = VALUES(risk_count),
+            critical_count = VALUES(critical_count),
+            high_count = VALUES(high_count),
+            medium_count = VALUES(medium_count),
+            low_count = VALUES(low_count),
+            ai_summary = VALUES(ai_summary),
+            analyzed_at = NOW(),
+            updated_at = NOW()
+    </insert>
+
+    <insert id="insertRisks">
+        INSERT INTO patch_security_risk
+            (result_id, host_id, risk_type, severity, title, description, evidence, recommendation, related_patches, related_cves)
+        VALUES
+        <foreach collection="risks" item="r" separator=",">
+            (#{r.resultId}, #{r.hostId}, #{r.riskType}, #{r.severity}, #{r.title},
+             #{r.description}, #{r.evidence}, #{r.recommendation}, #{r.relatedPatches}, #{r.relatedCves})
+        </foreach>
+    </insert>
+
+    <delete id="deleteRisksByHostId">
+        DELETE FROM patch_security_risk WHERE host_id = #{hostId}
+    </delete>
+
+    <select id="findAtRiskHosts" resultMap="ResultMap">
+        SELECT r.*, h.hostname, h.ip_address, h.os_name, h.os_version, h.status
+        FROM patch_security_result r
+        LEFT JOIN hosts h ON h.id = r.host_id AND h.deleted = 0
+        WHERE r.risk_count > 0
+        <if test="keyword != null and keyword != ''">
+            AND (h.hostname LIKE CONCAT('%', #{keyword}, '%') OR h.ip_address LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY r.risk_score DESC, r.analyzed_at DESC
+    </select>
+
+    <select id="findByHostId" resultMap="ResultMap">
+        SELECT r.*, h.hostname, h.ip_address, h.os_name, h.os_version, h.status
+        FROM patch_security_result r
+        LEFT JOIN hosts h ON h.id = r.host_id
+        WHERE r.host_id = #{hostId}
+    </select>
+
+    <select id="findRisksByHostId" resultMap="RiskMap">
+        SELECT * FROM patch_security_risk WHERE host_id = #{hostId} ORDER BY severity, id
+    </select>
+
+    <select id="findAllHostIdsWithPatches" resultType="long">
+        SELECT DISTINCT h.id FROM hosts h
+        INNER JOIN installed_patch ip ON ip.mac_address = h.mac_address
+        WHERE h.deleted = 0
+    </select>
+
+
+    <select id="findAllHostsWithAnalysis" resultMap="ResultMap">
+        SELECT h.id AS host_id, h.hostname, h.ip_address, h.mac_address, h.os_name, h.os_version, h.status,
+               COALESCE(r.risk_score, 0) AS risk_score,
+               COALESCE(r.risk_level, 'low') AS risk_level,
+               COALESCE(r.risk_count, 0) AS risk_count,
+               COALESCE(r.critical_count, 0) AS critical_count,
+               COALESCE(r.high_count, 0) AS high_count,
+               COALESCE(r.medium_count, 0) AS medium_count,
+               COALESCE(r.low_count, 0) AS low_count,
+               r.ai_summary,
+               r.analyzed_at
+        FROM hosts h
+        LEFT JOIN patch_security_result r ON r.host_id = h.id
+        WHERE h.deleted = 0
+        <if test="keyword != null and keyword != ''">
+            AND (h.hostname LIKE CONCAT('%', #{keyword}, '%') OR h.ip_address LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY r.risk_score DESC, h.hostname ASC
+    </select>
+
+    <update id="updateAiSummary">
+        UPDATE patch_security_result SET ai_summary = #{aiSummary}, updated_at = NOW()
+        WHERE host_id = #{hostId}
+    </update>
+</mapper>

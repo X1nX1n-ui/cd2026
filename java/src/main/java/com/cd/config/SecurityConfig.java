@@ -57,7 +57,10 @@ public class SecurityConfig {
                                 "/pages/**",
                                 "/vendor/**",
                                 "/favicon.ico",
-                                "/api/auth/login"
+                                "/font/**",
+                                "/api/auth/login",
+                                "/api/auth/send-reset-code",
+                                "/api/auth/reset-password"
                         ).permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

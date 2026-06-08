@@ -1,0 +1,139 @@
+'情查看、资产明细弹窗与自动刷新�?/p>'
+'主机名、IP、MAC 或系统名�? autocomplete='
+'on value="">全部状�?/option>'
+'on value="0">不刷�?/option>'
+'ion value="1">1�?/option>'
+'ion value="3">3�?/option>'
+'ion value="5">5�?/option>'
+'hHint">当前为手动刷新模�?/div>'
+'      high: "高风�?,'
+'    medium: "中风�?,'
+'       low: "低风�?,'
+'      safe: "无风�?'
+'            "�?: "high",'
+'            "高风�?: "high",'
+'            "�?: "medium",'
+'            "中风�?: "medium",'
+'            "�?: "low",'
+'            "低风�?: "low",'
+'            "�?: "safe",'
+'            "无风�?: "safe"'
+'me", title: "主机�?, minWidth: 18'
+'tus", title: "状�?, width: 120, '
+'g("仅在线主机支持发起资产探�?);'
+'msg("请至少选择一个探测模�?);'
+'e || "资产探测指令发送失�?);'
+'stname || "未命名主�?) + \'</div>\''
+"   + '<span>MAC�? + PlatformUti"
+"   + '<span>主IP�? + PlatformUti"
+'号", "包含本机账号与影子账�?)'
+'序", "采集当前主机已安装软�?)'
+'e-submit">发送探测指�?/button>\''
+'ent = "当前为手动刷新模�?;'
+'xtContent = "列表�?" + seconds + '
+'" 秒自动刷新一�?;'
+'rDetailItem("主机�?, host.hostnam'
+'erDetailItem("状�?, PlatformUtil'
+'rDetailItem("总内�?, host.memoryT'
+'tailItem("最后上报时�?, PlatformUtil'
+'stname || "未命名主�?) + \'</h2>\''
+'r.msg("暂不支持该资产类�?);'
+"      + '<p>MAC�? + PlatformUti"
+"详情，勾选两条记录后可并排对比�?/span>'"
+"  + '<strong>共找�?' + snapshots."
+"length + ' �? + PlatformUti"
+"勾选两条记录后可以并排对比差异�?/span>'"
+'play:none;">退出对�?/button>\''
+'ess-text">准备开始分�?..</div>\''
+'pty">请选择一条记录查看详�?/div>\')'
+'y-item-badge">最�?/span>\' : \'\')'
+'item-time">更新时间�? + PlatformUti'
+'item-time">记录时间�? + PlatformUti'
+'item-time">记录编号�? + PlatformUti'
+'ontent = "准备开始分�?..";'
+'y-empty">未找到该条记�?/div>\';'
+'xtContent = "分析�?..";'
+"l) + '采集结果的详细内容�?/p>'"
+"  + '<span>更新时间�? + PlatformUti"
+"  + '<span>更新时间�? + PlatformUti"
+"        ? '（当前显�?' + config.fil"
+"Count || 0) + '�?"
+'t-block-count">�?\' + items.leng'
+"th + ' �?/span>'"
+'int">用于排障和核对上报内�?/span>\''
+"'<header><span>�?' + (index + 1"
+") + ' �?/span></header"
+'SummaryChip("服务�?, firstDefined'
+'rSummaryChip("状�?, firstDefined'
+'SummaryChip("进程�?, firstDefined'
+'mmaryChip("可执行路�?, firstDefined'
+'SummaryChip("程序�?, firstDefined'
+'SummaryChip("发布�?, firstDefined'
+'SummaryChip("账号�?, firstDefined'
+'ummaryChip("启用状�?, firstDefined'
+'ummaryChip("最后登�?, firstDefined'
+"Html(label) + '�? + PlatformUti"
+'iskStatCard("高风�? + assetLabel,'
+'iskStatCard("中风�? + assetLabel,'
+'iskStatCard("低风�? + assetLabel,'
+'iskStatCard("无风�? + assetLabel,'
+'    .replace(/[�?�?。；;�?�?]/g, '
+'zed.indexOf("高风�?) >= 0 || norm'
+'alized === "�?) {'
+'zed.indexOf("中风�?) >= 0 || norm'
+'alized === "�?) {'
+'zed.indexOf("低风�?) >= 0 || norm'
+'alized === "�?) {'
+'zed.indexOf("无风�?) >= 0 || norm'
+'alized === "�?) {'
+'ext.indexOf("高风�?) >= 0 || resu'
+'.indexOf("风险等级:�?) >= 0) {'
+'ext.indexOf("中风�?) >= 0 || resu'
+'.indexOf("风险等级:�?) >= 0) {'
+'ext.indexOf("低风�?) >= 0 || resu'
+'.indexOf("风险等级:�?) >= 0) {'
+'ext.indexOf("无风�?) >= 0 || resu'
+'.indexOf("风险等级:�?) >= 0) {'
+'riskKey] || "未分�?;'
+'      name: "账号�?,'
+'  enabled: "启用状�?,'
+'  Enabled: "启用状�?,'
+'t_logon: "最后登录时�?,'
+'      State: "状�?,'
+'ablePath: "可执行路�?,'
+'ommandLine: "命令�?,'
+' Publisher: "发布�?,'
+'      state: "状�?,'
+'ble_path: "可执行路�?,'
+'mmand_line: "命令�?,'
+' publisher: "发布�?,'
+'lue.indexOf("建议�?) >= 0)) {'
+'ed.match(/风险原因[�?]\\s*([\\s\\S]*?)'
+'(?=加固建议[�?]|建议[�?]|$)/);'
+'h(/(?:加固建议|建议)[�?]\\s*([\\s\\S]*)$'
+'  layer.msg("请输�?MAC 地址");'
+'renderInput("主机�?, "hostname", '
+'false, "请输入逻辑核心�?, "number")'
+'renderInput("总内�?, "memoryTotal'
+'renderSelect("状�?, "status", ho'
+'eholder || ("请输�? + label)) + \''
+'yer.msg("导出组件未就�?);'
+'stname || "未命名主�?) + \'</strong>'
+" 的最�?<strong>' + Pl"
+"IP等敏感信息不会暴露完整内容�?/p>'"
+"      + '<em>适合�?Excel 打开查看和筛�?"
+"<em>适合技术人员做进一步分�?/em>'"
+"em>适合直接阅读，排版清晰规�?/em>'"
+'ort-submit">开始导�?/button>\''
+'.message || "处理�?..");'
+'    layer.msg("����ʧ�ܣ�������")'
+"hRiskCount + ' �?/span>，请重点关注'"
+"      : '未发现高风险�?;"
+"t + '</strong> �?/p>');"
+"     + '<p>您导出的�?<strong>' + Pl"
+"+ '</strong> 条记�?/p>'"
+'.closeAll()">知道�?/button>\''
+'          "导出失败�? + (task.messa'
+' || "未知错误") + "�?br>要重新尝试导出吗�?,'
+
+Total replacement chars: 154

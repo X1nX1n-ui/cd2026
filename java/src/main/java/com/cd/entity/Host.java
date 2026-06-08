@@ -17,10 +17,9 @@ public class Host {
     private String osName;
     private String osType;
     private String osVersion;
+    private String osBuild;
     private String status;
     private LocalDateTime lastSeenAt;
-    private String sourceQueue;
-    private String rawPayload;
     private Integer deleted;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -129,6 +128,14 @@ public class Host {
         this.osVersion = osVersion;
     }
 
+    public String getOsBuild() {
+        return osBuild;
+    }
+
+    public void setOsBuild(String osBuild) {
+        this.osBuild = osBuild;
+    }
+
     public String getStatus() {
         return status;
     }
@@ -143,22 +150,6 @@ public class Host {
 
     public void setLastSeenAt(LocalDateTime lastSeenAt) {
         this.lastSeenAt = lastSeenAt;
-    }
-
-    public String getSourceQueue() {
-        return sourceQueue;
-    }
-
-    public void setSourceQueue(String sourceQueue) {
-        this.sourceQueue = sourceQueue;
-    }
-
-    public String getRawPayload() {
-        return rawPayload;
-    }
-
-    public void setRawPayload(String rawPayload) {
-        this.rawPayload = rawPayload;
     }
 
     public Integer getDeleted() {

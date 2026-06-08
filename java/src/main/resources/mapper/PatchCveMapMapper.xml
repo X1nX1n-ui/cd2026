@@ -1,0 +1,60 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.PatchCveMapMapper">
+
+    <resultMap id="BaseResultMap" type="com.cd.entity.PatchCveMap">
+        <id column="id" property="id"/>
+        <result column="patch_id" property="patchId"/>
+        <result column="cve_id" property="cveId"/>
+        <result column="vendor" property="vendor"/>
+        <result column="product" property="product"/>
+        <result column="affected_version_range" property="affectedVersionRange"/>
+        <result column="fixed_version" property="fixedVersion"/>
+        <result column="fix_type" property="fixType"/>
+        <result column="exploit_status" property="exploitStatus"/>
+        <result column="kev_flag" property="kevFlag"/>
+        <result column="cvss_score" property="cvssScore"/>
+        <result column="severity" property="severity"/>
+        <result column="reference_url" property="referenceUrl"/>
+    </resultMap>
+
+    <select id="findByPatchIds" resultMap="BaseResultMap">
+        SELECT * FROM patch_cve_map
+        WHERE patch_id IN
+        <foreach collection="patchIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <select id="findByCveIds" resultMap="BaseResultMap">
+        SELECT * FROM patch_cve_map
+        WHERE cve_id IN
+        <foreach collection="cveIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <select id="findMissingPatchesForOs" resultMap="BaseResultMap">
+        SELECT * FROM patch_cve_map
+        WHERE vendor = #{vendor}
+        AND (
+            <foreach collection="productPatterns" item="p" separator=" OR ">
+                product LIKE CONCAT('%', #{p}, '%')
+            </foreach>
+        )
+        ORDER BY cvss_score DESC
+    </select>
+
+    <select id="findSupersedingPatches" resultMap="BaseResultMap">
+        SELECT * FROM patch_cve_map
+        WHERE patch_id = #{patchId}
+        LIMIT 1
+    </select>
+
+    <select id="findAllSecurityPatches" resultMap="BaseResultMap">
+        SELECT * FROM patch_cve_map
+        WHERE fix_type = 'security'
+        ORDER BY cvss_score DESC
+    </select>
+
+</mapper>

@@ -1,18 +1,18 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>主机管理</title>
-    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
-    <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/css/layui.css?v=3">
+    <link rel="stylesheet" href="/css/app.css?v=3">
 </head>
 <body class="app-body">
 <div class="page-shell">
     <div class="page-section">
         <section class="page-heading">
             <div>
-                <h1>主机管理</h1>
+                <h1>主机管理 <span style="font-size:11px;color:#4f86f7;font-weight:400;">[v20260608]</span></h1>
                 <p>实时展示主机在线状态，支持主机详情查看、资产明细弹窗与自动刷新。</p>
             </div>
         </section>
@@ -43,13 +43,15 @@
                         <div class="layui-input-inline">
                             <select id="autoRefreshSelect">
                                 <option value="0">不刷新</option>
-                                <option value="1">1秒</option>
-                                <option value="3">3秒</option>
-                                <option value="5">5秒</option>
+                                <option value="1">1</option>
+                                <option value="3">3</option>
+                                <option value="5">5</option>
                             </select>
                         </div>
                     </div>
                     <div class="host-refresh-hint host-toolbar-field" id="refreshHint">当前为手动刷新模式</div>
+                    <button type="button" class="layui-btn page-btn host-toolbar-btn" id="openProbeScheduleBtn" style="margin-left:8px;">探测策略</button>
+                    <button type="button" class="layui-btn page-secondary-btn host-toolbar-btn" id="batchExportBtn" style="margin-left:8px;">导出资产清单</button>
                 </div>
             </form>
         </section>
@@ -60,8 +62,8 @@
     </div>
 </div>
 
-<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
-<script src="/js/common.js"></script>
+<script src="/js/layui.js?v=3"></script>
+<script src="/js/common.js?v=3"></script>
 <script>
     layui.use(["table", "form", "layer"], function () {
         const table = layui.table;
@@ -118,12 +120,14 @@
         };
 
         let autoRefreshTimer = null;
+        let currentExportTaskId = null;
+        let exportPollTimer = null;
         let isReloading = false;
         let lastKnownPage = 1;
 
         init();
 
-        function init() {
+        function init() { console.log('[HOSTS] init() running, PlatformUtils:', typeof PlatformUtils, ', hasPermission:', (typeof PlatformUtils.hasPermission === 'function'));
             bindActions();
             renderTable();
             form.render();
@@ -155,7 +159,7 @@
             });
         }
 
-        function renderTable() {
+        function renderTable() { console.log('[HOSTS] renderTable starting, elem exists:', !!document.getElementById('hostTable'), ', token:', PlatformUtils.getToken().substring(0,8)+'...');
             table.render({
                 elem: "#hostTable",
                 id: "hostTable",
@@ -189,6 +193,7 @@
                     isReloading = false;
                 },
                 cols: [[
+                    {type: "checkbox"},
                     {field: "id", title: "ID", width: 80},
                     {field: "hostname", title: "主机名", minWidth: 180, templet: function (row) { return PlatformUtils.renderValue(row.hostname); }},
                     {field: "ipAddress", title: "主IP", minWidth: 160, templet: function (row) { return PlatformUtils.renderValue(row.ipAddress); }},
@@ -295,7 +300,7 @@
 
         function openProbeDialog(host) {
             if (String(host.status || "") !== "1" && String(host.status || "").toUpperCase() !== "ONLINE") {
-                layer.msg("仅在线主机支持发起资产探测");
+                layer.msg("删除成功");
                 return;
             }
 
@@ -325,7 +330,7 @@
                         };
 
                         if (!payload.account && !payload.service && !payload.process && !payload.app) {
-                            layer.msg("请至少选择一个探测模块");
+                            layer.msg("删除成功");
                             return;
                         }
 
@@ -338,7 +343,7 @@
                         })
                             .then(function () {
                                 layer.close(index);
-                                layer.msg("资产探测指令已发送到队列");
+                                layer.msg("删除成功");
                             })
                             .catch(function (error) {
                                 layer.msg(error.message || "资产探测指令发送失败");
@@ -379,6 +384,467 @@
                 + '</label>';
         }
 
+        
+
+        // ===========================================
+        //  探测策略调度配置
+        // ===========================================
+        var scheduleDialogIndex = null;
+        var scheduleConfig = null;
+        var scheduleHostCache = [];
+
+        document.getElementById("openProbeScheduleBtn").addEventListener("click", function () {
+            openProbeScheduleDialog();
+        });
+
+        function openProbeScheduleDialog() {
+            Promise.all([
+                PlatformUtils.request("/api/probe-schedule", { method: "GET" }),
+                PlatformUtils.request("/api/hosts/page?status=1&pageSize=200", { method: "GET" })
+            ]).then(function (results) {
+                scheduleConfig = results[0];
+                var hostPage = results[1];
+                scheduleHostCache = hostPage.rows || hostPage.data || [];
+                renderScheduleDialog();
+            }).catch(function (error) {
+                layer.msg("加载探测策略失败：" + (error.message || "未知错误"));
+            });
+        }
+
+        function renderScheduleDialog() {
+            var config = scheduleConfig;
+            var enabled = config.enabled === true || config.enabled === 1;
+            var cronExpr = config.cronExpression || "0 */5 * * * ?";
+            var targetType = config.targetType || "all_online";
+            var selectedIds = parseSelectedHostIds(config.targetHostIds);
+
+            var html = '<div class="schedule-dialog-shell">'
+                + '<div class="schedule-section">'
+                + '<div class="schedule-section-title">策略状态</div>'
+                + '<label class="schedule-toggle">'
+                + '<input type="checkbox" id="scheduleEnabled" ' + (enabled ? 'checked' : '') + '>'
+                + '<span class="schedule-toggle-track"></span>'
+                + '<span class="schedule-toggle-label">' + (enabled ? '自动探测已开启' : '自动探测已关闭') + '</span>'
+                + '</label>'
+                + '</div>'
+                + '<div class="schedule-section">'
+                + '<div class="schedule-section-title">执行周期</div>'
+                + '<div class="schedule-cron-presets" id="cronPresets">'
+                + buildCronPreset("每5分钟", "0 */5 * * * ?", cronExpr)
+                + buildCronPreset("每15分钟", "0 */15 * * * ?", cronExpr)
+                + buildCronPreset("每30分钟", "0 */30 * * * ?", cronExpr)
+                + buildCronPreset("每1小时", "0 0 */1 * * ?", cronExpr)
+                + buildCronPreset("每2小时", "0 0 */2 * * ?", cronExpr)
+                + buildCronPreset("每6小时", "0 0 */6 * * ?", cronExpr)
+                + buildCronPreset("每12小时", "0 0 */12 * * ?", cronExpr)
+                + buildCronPreset("自定义", "__custom__", cronExpr, true)
+                + '</div>'
+                + '<div class="schedule-cron-custom" id="cronCustomRow" style="display:' + (isCustomCron(cronExpr) ? 'flex' : 'none') + ';">'
+                + '<div style="flex:1;display:flex;flex-direction:column;gap:6px;">'
+                + '<input type="text" id="cronHumanInput" value="' + PlatformUtils.escapeHtml(cronToHuman(cronExpr)) + '" placeholder="例如：每10分钟 / 每3小时 / 每天8:30">'
+                + '<input type="text" id="cronRawInput" value="' + PlatformUtils.escapeHtml(cronExpr) + '" placeholder="Cron" style="display:none;font-family:monospace;font-size:12px;color:#888;">'
+                + '<a href="#" id="cronAdvancedToggle" style="font-size:11px;color:#999;text-decoration:none;">高级模式</a>'
+                + '</div>'
+                + '</div>'
+                + '<div class="schedule-cron-hint"><strong>' + cronToHuman(cronExpr) + '</strong></div>'
+                + '</div>'
+                + '<div class="schedule-section">'
+                + '<div class="schedule-section-title">目标主机</div>'
+                + '<div style="margin-bottom:8px;">'
+                + '<label style="margin-right:20px;cursor:pointer;"><input type="radio" name="targetType" value="all_online" ' + (targetType === "all_online" ? 'checked' : '') + '> 全部在线主机</label>'
+                + '<label style="cursor:pointer;"><input type="radio" name="targetType" value="selected" ' + (targetType === "selected" ? 'checked' : '') + '> 指定主机</label>'
+                + '</div>'
+                + '<div class="schedule-host-chips" id="hostChips" style="display:' + (targetType === "selected" ? 'flex' : 'none') + ';">'
+                + buildHostChips(selectedIds)
+                + '</div>'
+                + '</div>'
+                + '<div class="schedule-section">'
+                + '<div class="schedule-section-title">探测资产类型</div>'
+                + '<div class="schedule-option-grid">'
+                + buildAssetOption("account", "账号", "本机账号与影子账号", config.probeAccount)
+                + buildAssetOption("service", "服务", "主机服务信息", config.probeService)
+                + buildAssetOption("process", "进程", "运行进程", config.probeProcess)
+                + buildAssetOption("app", "安装程序", "已安装软件", config.probeApp)
+                + '</div>'
+                + '</div>'
+                + '<div class="schedule-dialog-footer">'
+                + '<div class="left-actions">'
+                + '<button type="button" class="layui-btn layui-btn-sm page-secondary-btn" id="executeNowBtn" style="min-width:110px;">立即执行一次</button>'
+                + '</div>'
+                + '<div style="display:flex;gap:8px;">'
+                + '<button type="button" class="layui-btn layui-btn-sm page-secondary-btn" id="scheduleCancelBtn" style="min-width:80px;">取消</button>'
+                + '<button type="button" class="layui-btn layui-btn-sm page-secondary-btn" id="scheduleSaveBtn" style="min-width:100px;">保存配置</button>'
+                + '</div>'
+                + '</div>'
+                + '</div>';
+
+            scheduleDialogIndex = layer.open({
+                type: 1,
+                title: "探测策略配置",
+                area: ["600px", "auto"],
+                shadeClose: true,
+                content: html,
+                success: function (layero) { bindScheduleDialogEvents(layero); },
+                cancel: function () { scheduleDialogIndex = null; }
+            });
+        }
+
+        
+        function humanToCron(text) {
+            if (!text) return '';
+            var t = text.trim();
+            if (/^[0-9*\/,?\-]+(\s+[0-9*\/,?\-]+){4,5}$/.test(t)) return t;
+            var cn = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9,"十":10,"零":0,"两":2,"半":30};
+            t = t.replace(/[一二三四五六七八九十两零半]+/g, function(m) { return cn[m] || m; });
+            var nums = t.match(/\d+/g);
+            if (!nums) return '';
+            if (/[\u5206]|min/i.test(t) && !/[\u5c0f\u65f6]|[\u65f6](?!\u95f4)|[\u70b9]|[\u5929]|[\u65e5]/i.test(t)) {
+                return '0 */' + nums[0] + ' * * * ?';
+            }
+            if (/[\u5c0f\u65f6]|[\u65f6](?!\u95f4)/i.test(t) && !/[\u5929]|[\u65e5]/i.test(t)) {
+                var mm = nums.length > 1 ? nums[1] : '0';
+                return '0 ' + mm + ' */' + nums[0] + ' * * ?';
+            }
+            if (/[\u5929]|[\u65e5]/i.test(t)) {
+                var intv = '1';
+                var m1 = t.match(/\u6bcf.*?(\d+).*?[\u5929]/);
+                if (m1) intv = m1[1];
+                var hh = nums.length > 1 ? nums[nums.length-2] : '0';
+                var mm2 = nums.length > 2 ? nums[nums.length-1] : '0';
+                if (intv === '1') return '0 ' + mm2 + ' ' + hh + ' * * ?';
+                return '0 ' + mm2 + ' ' + hh + ' */' + intv + ' * ?';
+            }
+            if (/:/.test(t) && nums.length >= 2) {
+                var parts = t.split(':');
+                return '0 ' + parts[1].replace(/\D/g,'') + ' ' + parts[0].replace(/\D/g,'') + ' * * ?';
+            }
+            return '';
+        }
+
+        function cronToHuman(cron) {
+            if (!cron) return "未设置";
+            var parts = cron.trim().split(/\s+/);
+            if (parts.length < 6) return cron;
+            var sec = parts[0], min = parts[1], hour = parts[2], day = parts[3], mon = parts[4];
+            if (sec === "0" && min.startsWith("*/") && hour === "*" && day === "*" && mon === "*") {
+                return "每" + min.slice(2) + "分钟自动探测一次";
+            }
+            if (sec === "0" && min === "0" && hour.startsWith("*/") && day === "*" && mon === "*") {
+                return "每" + hour.slice(2) + "小时自动探测一次";
+            }
+            if (sec === "0" && !min.includes("/") && !min.includes(",") && !hour.includes("/") && !hour.includes(",") && day === "*" && mon === "*") {
+                return "每天 " + hour + ":" + (min.length === 1 ? "0" + min : min) + " 自动探测一次";
+            }
+            if (sec === "0" && day.startsWith("*/") && mon === "*") {
+                return "每" + day.slice(2) + "天 " + hour + ":" + (min.length === 1 ? "0" + min : min) + " 自动探测一次";
+            }
+            var desc = [];
+            if (min.startsWith("*/")) desc.push("每" + min.slice(2) + "分钟");
+            else if (min !== "*" && min !== "0") desc.push("第" + min + "分");
+            if (hour.startsWith("*/")) desc.push("每" + hour.slice(2) + "小时");
+            else if (hour !== "*") desc.push(hour + "时");
+            if (day.startsWith("*/")) desc.push("每" + day.slice(2) + "天");
+            if (desc.length > 0) return desc.join("") + "自动探测一次";
+            return cron;
+        }
+
+        function buildCronPreset(label, value, currentCron, isCustom) {
+            var active = (!isCustom && value === currentCron) || (isCustom && isCustomCron(currentCron));
+            return '<span class="schedule-cron-preset' + (active ? ' active' : '') + '" data-cron="' + PlatformUtils.escapeHtml(value) + '">' + label + '</span>';
+        }
+
+        function isCustomCron(cron) {
+            var presets = ["0 */5 * * * ?", "0 */15 * * * ?", "0 */30 * * * ?", "0 0 */1 * * ?", "0 0 */2 * * ?", "0 0 */6 * * ?", "0 0 */12 * * ?"];
+            return presets.indexOf(cron) === -1;
+        }
+
+        function buildHostChips(selectedIds) {
+            var hosts = scheduleHostCache;
+            if (!hosts.length) return '<span style="font-size:12px;color:#999;">暂无在线主机</span>';
+            return hosts.map(function (h) {
+                var sel = selectedIds.indexOf(h.id) >= 0;
+                return '<span class="schedule-host-chip' + (sel ? ' selected' : '') + '" data-host-id="' + h.id + '">'
+                    + '<span class="chip-dot"></span>'
+                    + PlatformUtils.escapeHtml(h.hostname || h.ipAddress || h.macAddress)
+                    + '</span>';
+            }).join("");
+        }
+
+        function buildAssetOption(name, label, desc, checked) {
+            var isChecked = checked === 1 || checked === true;
+            return '<label class="schedule-option-item">'
+                + '<input type="checkbox" name="probe_' + name + '" ' + (isChecked ? 'checked' : '') + '>'
+                + '<span class="schedule-option-label">' + label + '</span>'
+                + '<span class="schedule-option-desc">' + desc + '</span>'
+                + '</label>';
+        }
+
+        function parseSelectedHostIds(idsStr) {
+            if (!idsStr) return [];
+            return idsStr.split(",").map(function (s) { return parseInt(s.trim(), 10); }).filter(function (n) { return !isNaN(n); });
+        }
+
+        function bindScheduleDialogEvents(layero) {
+            var root = layero[0] || layero;
+            root.querySelector("#scheduleEnabled").addEventListener("change", function () {
+                this.parentNode.querySelector(".schedule-toggle-label").textContent = this.checked ? "自动探测已开启" : "自动探测已关闭";
+            });
+            root.querySelector("#cronPresets").addEventListener("click", function (e) {
+                var preset = e.target.closest(".schedule-cron-preset");
+                if (!preset) return;
+                var cronValue = preset.getAttribute("data-cron");
+                var customRow = root.querySelector("#cronCustomRow");
+                var customInput = root.querySelector("#cronCustomInput");
+                this.querySelectorAll(".schedule-cron-preset").forEach(function (p) { p.classList.remove("active"); });
+                preset.classList.add("active");
+                if (cronValue === "__custom__") {
+                    customRow.style.display = "flex";
+                    customInput.focus();
+                } else {
+                    customRow.style.display = "none";
+                    customInput.value = cronValue;
+                    updateScheduleHint(root, cronValue);
+                    var hi = root.querySelector('#cronHumanInput');
+                    if (hi) hi.value = cronToHuman(cronValue);
+                }
+            });
+            var hi3 = root.querySelector("#cronHumanInput");
+            var ri2 = root.querySelector("#cronRawInput");
+            var at = root.querySelector("#cronAdvancedToggle");
+            hi3.addEventListener("input", function () {
+                root.querySelector("#cronPresets").querySelectorAll(".schedule-cron-preset").forEach(function (p) { p.classList.remove("active"); });
+                var cp2 = root.querySelector('.schedule-cron-preset[data-cron="__custom__"]');
+                if (cp2) cp2.classList.add("active");
+                var p = humanToCron(this.value.trim());
+                if (p) { ri2.value = p; updateScheduleHint(root, p); }
+            });
+            ri2.addEventListener("input", function () {
+                updateScheduleHint(root, this.value.trim());
+            });
+            at.addEventListener("click", function (e) {
+                e.preventDefault();
+                var rv = ri2.style.display !== 'none';
+                ri2.style.display = rv ? 'none' : 'block';
+                hi3.style.display = rv ? 'block' : 'none';
+                this.textContent = rv ? '高级模式' : '简单模式';
+            });
+            root.querySelectorAll('input[name="targetType"]').forEach(function (radio) {
+                radio.addEventListener("change", function () {
+                    root.querySelector("#hostChips").style.display = this.value === "selected" ? "flex" : "none";
+                });
+            });
+            root.querySelector("#hostChips").addEventListener("click", function (e) {
+                var chip = e.target.closest(".schedule-host-chip");
+                if (!chip) return;
+                chip.classList.toggle("selected");
+            });
+            root.querySelector("#scheduleCancelBtn").addEventListener("click", function () {
+                layer.close(scheduleDialogIndex);
+                scheduleDialogIndex = null;
+            });
+            root.querySelector("#scheduleSaveBtn").addEventListener("click", function () {
+                saveScheduleConfig(root);
+            });
+            root.querySelector("#executeNowBtn").addEventListener("click", function () {
+                var btn = this;
+                btn.disabled = true;
+                btn.textContent = "发送中...";
+                PlatformUtils.request("/api/probe-schedule/execute-now", { method: "POST" })
+                    .then(function () { layer.msg("探测指令已发送", { icon: 1 }); })
+                    .catch(function (error) { layer.msg("执行失败：" + (error.message || "")); })
+                    .finally(function () { btn.disabled = false; btn.textContent = "立即执行一次"; });
+            });
+        }
+
+        function updateScheduleHint(root, cronValue) {
+            var hintEl = root.querySelector(".schedule-cron-hint");
+            if (hintEl) {
+                hintEl.innerHTML = "<strong>" + cronToHuman(cronValue) + "</strong>";
+            }
+        }
+
+        function saveScheduleConfig(root) {
+            var enabled = root.querySelector("#scheduleEnabled").checked;
+            var targetType = root.querySelector('input[name="targetType"]:checked').value;
+            var hi2 = root.querySelector("#cronHumanInput");
+            var ri = root.querySelector("#cronRawInput");
+            var ht = hi2 ? hi2.value.trim() : "";
+            var rc = ri ? ri.value.trim() : "";
+            var cronExpr = rc || humanToCron(ht) || ht;
+            var selectedIds = [];
+            if (targetType === "selected") {
+                root.querySelectorAll(".schedule-host-chip.selected").forEach(function (chip) {
+                    var id = parseInt(chip.getAttribute("data-host-id"), 10);
+                    if (!isNaN(id)) selectedIds.push(id);
+                });
+            }
+            var payload = {
+                enabled: enabled,
+                cronExpression: cronExpr || "0 */5 * * * ?",
+                targetType: targetType,
+                targetHostIds: targetType === "selected" ? selectedIds.join(",") : null,
+                probeAccount: root.querySelector('input[name="probe_account"]').checked ? 1 : 0,
+                probeService: root.querySelector('input[name="probe_service"]').checked ? 1 : 0,
+                probeProcess: root.querySelector('input[name="probe_process"]').checked ? 1 : 0,
+                probeApp: root.querySelector('input[name="probe_app"]').checked ? 1 : 0
+            };
+            if (!payload.probeAccount && !payload.probeService && !payload.probeProcess && !payload.probeApp) {
+                layer.msg("请至少选择一种探测资产类型");
+                return;
+            }
+            var saveBtn = root.querySelector("#scheduleSaveBtn");
+            saveBtn.disabled = true;
+            saveBtn.textContent = "保存中...";
+            PlatformUtils.request("/api/probe-schedule", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            }).then(function (saved) {
+                scheduleConfig = saved;
+                layer.close(scheduleDialogIndex);
+                scheduleDialogIndex = null;
+                layer.msg("探测策略已保存" + (saved.enabled ? "，自动探测已生效" : ""), { icon: 1 });
+            }).catch(function (error) {
+                layer.msg("保存失败：" + (error.message || ""));
+            }).finally(function () {
+                saveBtn.disabled = false;
+                saveBtn.textContent = "保存配置";
+            });
+        }
+
+
+        var exportTaskId = null;
+
+
+        document.getElementById("batchExportBtn").addEventListener("click", function () {
+            openBatchExportDialog();
+        });
+
+        function openBatchExportDialog() {
+            var checked = table.checkStatus("hostTable");
+            var selectedHosts = checked.data || [];
+            if (selectedHosts.length === 0) {
+                layer.msg("请先勾选要导出的主机");
+                return;
+            }
+            var hostNames = selectedHosts.map(function (h) { return h.hostname || h.ipAddress || "ID:" + h.id; });
+            var hostListHtml = hostNames.slice(0, 5).map(function (n) { return '<span style="display:inline-block;background:#1e3a5f;color:#b8d4fe;padding:3px 10px;border-radius:12px;margin:2px;font-size:12px;font-weight:500;border:1px solid #2d5a8e;">' + PlatformUtils.escapeHtml(n) + '</span>'; }).join("");
+            if (hostNames.length > 5) hostListHtml += ' <span style="color:#999;font-size:12px;">等 ' + hostNames.length + ' 台主机</span>';
+
+            var html = '<div style="padding:12px 20px;">'
+                + '<div style="margin-bottom:12px;"><strong>已选择主机：</strong></div>'
+                + '<div style="margin-bottom:16px;">' + hostListHtml + '</div>'
+                + '<div style="margin-bottom:12px;"><strong>选择资产类型：</strong></div>'
+                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">'
+                + '<label class="schedule-option-item"><input type="checkbox" name="exp_account" checked><span class="schedule-option-label">账号</span></label>'
+                + '<label class="schedule-option-item"><input type="checkbox" name="exp_service" checked><span class="schedule-option-label">服务</span></label>'
+                + '<label class="schedule-option-item"><input type="checkbox" name="exp_process" checked><span class="schedule-option-label">进程</span></label>'
+                + '<label class="schedule-option-item"><input type="checkbox" name="exp_app" checked><span class="schedule-option-label">安装程序</span></label>'
+                + '</div>'
+                + '<div style="margin-bottom:12px;"><strong>导出格式：</strong></div>'
+                + '<div style="display:flex;gap:12px;margin-bottom:16px;">'
+                + '<label><input type="radio" name="expFormat" value="markdown" checked> Markdown（推荐，清晰易读）</label>'
+                + '<label><input type="radio" name="expFormat" value="json"> JSON</label>'
+                + '</div>'
+                + '<div id="exportProgressBar" style="display:none;margin-bottom:12px;">'
+                + '<div style="background:#f0f0f0;border-radius:8px;height:8px;overflow:hidden;">'
+                + '<div id="exportProgressFill" style="height:100%;background:var(--color-primary,#4f86f7);width:0%;transition:width 0.3s;"></div>'
+                + '</div>'
+                + '<div id="exportProgressText" style="font-size:12px;color:#666;margin-top:4px;"></div>'
+                + '</div>'
+                + '<div style="display:flex;justify-content:flex-end;gap:8px;">'
+                + '<button type="button" class="layui-btn layui-btn-sm page-secondary-btn" id="exportCancelBtn">取消</button>'
+                + '<button type="button" class="layui-btn layui-btn-sm page-secondary-btn" id="exportStartBtn" style="background:linear-gradient(180deg,#5f95ff 0%,#4f86f7 100%);color:#eef2f7;border-color:rgba(79,134,247,0.3);">开始导出</button>'
+                + '</div>'
+                + '</div>';
+
+            var dlgIdx = layer.open({
+                type: 1,
+                title: "导出资产清单",
+                area: ["520px", "auto"],
+                shadeClose: true,
+                content: html,
+                success: function (layero) {
+                    var root = layero[0] || layero;
+                    root.querySelector("#exportCancelBtn").addEventListener("click", function () { layer.close(dlgIdx); });
+                    root.querySelector("#exportStartBtn").addEventListener("click", function () {
+                        startBatchExport(root, dlgIdx, selectedHosts);
+                    });
+                }
+            });
+        }
+
+        function startBatchExport(root, dlgIdx, selectedHosts) {
+            var types = [];
+            ["account","service","process","app"].forEach(function (t) {
+                if (root.querySelector('input[name="exp_' + t + '"]').checked) types.push(t);
+            });
+            if (types.length === 0) { layer.msg("请至少选择一种资产类型"); return; }
+            var format = root.querySelector('input[name="expFormat"]:checked').value;
+            var hostIds = selectedHosts.map(function (h) { return h.id; });
+
+            var startBtn = root.querySelector("#exportStartBtn");
+            var cancelBtn = root.querySelector("#exportCancelBtn");
+            var bar = root.querySelector("#exportProgressBar");
+            var fill = root.querySelector("#exportProgressFill");
+            var text = root.querySelector("#exportProgressText");
+            startBtn.disabled = true;
+            cancelBtn.disabled = true;
+            bar.style.display = "block";
+            fill.style.width = "5%";
+            text.textContent = "正在提交导出任务...";
+
+            PlatformUtils.request("/api/assets/export/batch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hostIds: hostIds, assetTypes: types, format: format })
+            }).then(function (task) {
+                exportTaskId = task.taskId;
+                pollBatchExport(task.taskId, fill, text, dlgIdx, root);
+            }).catch(function (err) {
+                bar.style.display = "none";
+                startBtn.disabled = false;
+                cancelBtn.disabled = false;
+                layer.msg("启动导出失败：" + (err.message || ""));
+            });
+        }
+
+        function pollBatchExport(taskId, fill, text, dlgIdx, root) {
+            exportPollTimer = setInterval(function () {
+                PlatformUtils.request("/api/assets/export/" + taskId).then(function (task) {
+                    fill.style.width = (task.progress || 0) + "%";
+                    text.textContent = task.message || "";
+                    if (task.status === "COMPLETED") {
+                        clearInterval(exportPollTimer);
+                        layer.close(dlgIdx);
+                        fetch("/api/assets/export/" + task.taskId + "/download", { headers: PlatformUtils.authHeaders() })
+                            .then(function (r) { return r.blob(); })
+                            .then(function (blob) {
+                                var a = document.createElement("a");
+                                a.href = URL.createObjectURL(blob);
+                                a.download = task.fileName || "export";
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                layer.msg("导出完成，共 " + task.totalRecords + " 条记录", { icon: 1 });
+                            }).catch(function () { layer.msg("下载失败"); });
+                    } else if (task.status === "FAILED") {
+                        clearInterval(exportPollTimer);
+                        text.textContent = task.message || "导出失败";
+                        root.querySelector("#exportStartBtn").disabled = false;
+                        root.querySelector("#exportCancelBtn").disabled = false;
+                        layer.msg(task.message || "导出失败");
+                    }
+                }).catch(function () {});
+            }, 1000);
+        }
+
+        // Patch clearAssetExportPoll to also clear our timer
+        var _origClearExport = typeof clearAssetExportPoll === "function" ? clearAssetExportPoll : function(){};
+        clearAssetExportPoll = function() {
+            _origClearExport();
+            if (exportPollTimer) { clearInterval(exportPollTimer); exportPollTimer = null; }
+        };
         function configureAutoRefresh(value) {
             clearAutoRefresh();
             const seconds = Number(value || 0);
@@ -404,7 +870,7 @@
                 refreshHint.textContent = "当前为手动刷新模式";
                 return;
             }
-            refreshHint.textContent = "列表每 " + seconds + " 秒自动刷新一次";
+            refreshHint.textContent = "列表每" + seconds + " 秒自动刷新一次";
         }
 
         function renderMemoryUsage(row) {
@@ -468,6 +934,7 @@
                 renderDetailItem("操作系统", host.osName),
                 renderDetailItem("系统类型", host.osType),
                 renderDetailItem("系统版本", host.osVersion),
+                renderDetailItem("系统 Build", host.osBuild),
                 renderDetailItem("系统详情", host.osDetail),
                 renderDetailItem("CPU 架构", host.cpuArchitecture),
                 renderDetailItem("CPU 名称", host.cpuName),
@@ -477,8 +944,7 @@
                 renderDetailItem("最后上报时间", PlatformUtils.formatDateTime(host.lastSeenAt)),
                 renderDetailItem("更新时间", PlatformUtils.formatDateTime(host.updatedAt)),
                 renderDetailItem("创建时间", PlatformUtils.formatDateTime(host.createdAt)),
-                renderDetailItem("来源队列", host.sourceQueue)
-            ];
+                ];
 
             return '<div class="host-detail-panel">'
                 + '<div class="host-detail-hero">'
@@ -489,10 +955,6 @@
                 + '<div>' + PlatformUtils.renderHostStatus(host.status) + '</div>'
                 + '</div>'
                 + '<div class="host-detail-grid">' + baseItems.join("") + '</div>'
-                + '<div class="host-detail-raw">'
-                + '<div class="host-detail-section-title">原始上报数据</div>'
-                + '<pre>' + PlatformUtils.escapeHtml(host.rawPayload || "--") + '</pre>'
-                + '</div>'
                 + '</div>';
         }
 
@@ -506,7 +968,7 @@
         function openAssetDialog(host, assetType) {
             const assetMeta = assetTypeMap[assetType];
             if (!assetMeta) {
-                layer.msg("暂不支持该资产类型");
+                layer.msg("删除成功");
                 return;
             }
 
@@ -554,17 +1016,19 @@
                 + '</section>'
                 + '<section class="asset-history-toolbar">'
                 + '<div class="asset-history-toolbar-copy">'
-                + '<strong>共找到 ' + snapshots.length + ' 条' + PlatformUtils.escapeHtml(assetMeta.label) + '历史记录</strong>'
+                + '<strong>共找到' + snapshots.length + ' 条' + PlatformUtils.escapeHtml(assetMeta.label) + '历史记录</strong>'
                 + '<span>单击左侧记录查看详情，勾选两条记录后可以并排对比差异。</span>'
                 + '</div>'
                 + '<div class="asset-history-toolbar-actions">'
                 + '<button type="button" class="layui-btn page-btn asset-ai-analyze-trigger">AI辅助分析</button>'
-                + '<button type="button" class="layui-btn page-btn asset-compare-trigger" disabled>对比选中记录</button>'
+                + '<button type="button" class="layui-btn page-btn asset-compare-trigger" disabled>对比选中记录</button>' +
+                  '<button type="button" class="layui-btn page-btn asset-export-trigger" id="assetExportTrigger">导出清单</button>'
                 + '<button type="button" class="layui-btn page-secondary-btn asset-compare-cancel" style="display:none;">退出对比</button>'
                 + '</div>'
                 + '<div class="asset-ai-progress" style="display:none;">'
                 + '<div class="asset-ai-progress-track"><span class="asset-ai-progress-bar" style="width:0%;"></span></div>'
-                + '<div class="asset-ai-progress-text">准备开始分析...</div>'
+                + '<div class="asset-ai-progress-text">准备开始分...</div>'
+                  + '<div class="asset-export-progress-bar" id="assetExportProgressBar" style="display:none;"><div class="export-progress-inner"><span class="export-progress-text"></span><div class="export-progress-percent"></div><div class="export-progress-track"><span></span></div></div></div>'
                 + '</div>'
                 + '</section>'
                 + '<section class="asset-history-layout">'
@@ -575,7 +1039,7 @@
                 + '</aside>'
                 + '<div class="asset-history-stage">'
                 + '<div class="asset-history-stage-content">'
-                + (defaultSnapshot ? buildAssetSnapshotView(host, defaultSnapshot, assetMeta) : '<div class="asset-history-empty">请选择一条记录查看详情</div>')
+                + (defaultSnapshot ? buildAssetSnapshotView(host, defaultSnapshot, assetMeta) : '<div class="asset-history-empty">请选择一条记录查看详</div>')
                 + '</div>'
                 + '</div>'
                 + '</section>'
@@ -597,7 +1061,7 @@
                 + '<div class="asset-history-item-top">'
                 + '<div class="asset-history-item-title-wrap">'
                 + '<span class="asset-history-item-title">记录 #' + PlatformUtils.escapeHtml(String(snapshot.id)) + '</span>'
-                + (index === 0 ? '<span class="asset-history-item-badge">最新</span>' : '')
+                + (index === 0 ? '<span class="asset-history-item-badge">最</span>' : '')
                 + '</div>'
                 + '<span class="asset-history-item-time">更新时间：' + PlatformUtils.escapeHtml(updatedAt || "--") + '</span>'
                 + '</div>'
@@ -626,6 +1090,8 @@
             const compareTrigger = rootElement.querySelector(".asset-compare-trigger");
             const compareCancel = rootElement.querySelector(".asset-compare-cancel");
             const analyzeTrigger = rootElement.querySelector(".asset-ai-analyze-trigger");
+              const exportTrigger = rootElement.querySelector(".asset-export-trigger");
+              const exportProgressBar = rootElement.querySelector(".asset-export-progress-bar");
             const progressBox = rootElement.querySelector(".asset-ai-progress");
             const progressBar = rootElement.querySelector(".asset-ai-progress-bar");
             const progressText = rootElement.querySelector(".asset-ai-progress-text");
@@ -665,7 +1131,7 @@
                         progressBar.style.width = "0%";
                     }
                     if (progressText) {
-                        progressText.textContent = "准备开始分析...";
+                        progressText.textContent = "准备开始分...";
                     }
                 }, delayHide || 0);
             }
@@ -683,7 +1149,7 @@
                 setAnalyzeProgress(taskStatus.progress || 0, taskStatus.stageText || "AI 正在分析...");
                 if (taskStatus.status === "success") {
                     const normalizedSnapshot = taskStatus.result || null;
-                    layer.msg("AI 分析完成");
+                    layer.msg("删除成功");
                     currentRiskFilter = "all";
                     if (normalizedSnapshot) {
                         snapshotMap[String(normalizedSnapshot.id)] = normalizedSnapshot;
@@ -721,7 +1187,14 @@
                 return checkedIds;
             }
 
-            function renderSnapshot(snapshot) {
+            
+              if (exportTrigger) {
+                  exportTrigger.addEventListener("click", function () {
+                      startAssetExport(host, assetType, assetMeta, exportProgressBar);
+                  });
+              }
+
+              function renderSnapshot(snapshot) {
                 stageContent.innerHTML = snapshot
                     ? buildAssetSnapshotView(host, snapshot, assetMeta, currentRiskFilter)
                     : '<div class="asset-history-empty">未找到该条记录</div>';
@@ -750,7 +1223,7 @@
                     const checkedIds = syncCompareState();
                     if (checkedIds.length > 2) {
                         input.checked = false;
-                        layer.msg("最多只能选择两条记录进行对比");
+                        layer.msg("删除成功");
                         syncCompareState();
                     }
                 });
@@ -759,7 +1232,7 @@
             compareTrigger.addEventListener("click", function () {
                 const checkedIds = syncCompareState();
                 if (checkedIds.length !== 2) {
-                    layer.msg("请选择两条记录进行对比");
+                    layer.msg("删除成功");
                     return;
                 }
                 const leftSnapshot = snapshotMap[checkedIds[0]];
@@ -791,7 +1264,7 @@
                     }
                     isAnalyzing = true;
                     analyzeTrigger.disabled = true;
-                    analyzeTrigger.textContent = "分析中...";
+                    analyzeTrigger.textContent = "分析...";
                     setAnalyzeProgress(4, "正在创建分析任务...");
                     PlatformUtils.request("/api/hosts/" + host.id + "/asset-detail/" + assetType + "/analyze-task", {
                         method: "POST"
@@ -871,12 +1344,12 @@
         function renderAssetSectionBlock(title, items, options) {
             const config = options || {};
             const suffix = typeof config.filteredCount === "number"
-                ? '（当前显示 ' + config.filteredCount + ' / ' + (config.totalCount || 0) + '）'
+                ? '（当前显示' + config.filteredCount + ' / ' + (config.totalCount || 0) + '条'
                 : '';
             return '<section class="asset-array-section">'
                 + '<div class="asset-block-head">'
                 + '<div class="asset-block-title">' + PlatformUtils.escapeHtml(title) + suffix + '</div>'
-                + '<span class="asset-block-count">共 ' + items.length + ' 条</span>'
+                + '<span class="asset-block-count">条' + items.length + ' </span>'
                 + '</div>'
                 + (items.length ? renderArrayGrid(items, !!config.riskMode, title) : '<div class="asset-empty-inline">暂无数据</div>')
                 + '</section>';
@@ -908,7 +1381,7 @@
             const summaryHtml = renderAssetObjectSummary(item, assetLabel);
             const sortedEntries = sortAssetEntries(entries, getPreferredFieldOrder(assetLabel));
             return '<article class="asset-object-card">'
-                + '<header><span>第 ' + (index + 1) + ' 项</span></header>'
+                + '<header><span>条' + (index + 1) + '</span></header>'
                 + summaryHtml
                 + '<div class="asset-object-fields">'
                 + sortedEntries.map(function (entry) {
@@ -1042,7 +1515,7 @@
 
         function renderHistoryMetric(label, value) {
             return '<span class="asset-history-summary-pill">'
-                + PlatformUtils.escapeHtml(label) + '：' + PlatformUtils.escapeHtml(String(value == null || value === "" ? "--" : value))
+                + PlatformUtils.escapeHtml(label) + '条' + PlatformUtils.escapeHtml(String(value == null || value === "" ? "--" : value))
                 + '</span>';
         }
 
@@ -1129,20 +1602,20 @@
 
             const normalized = raw
                 .replace(/\s+/g, "")
-                .replace(/[：:，,。；;！!？?]/g, "")
+                .replace(/[：，。；、？！—]/g, "")
                 .toLowerCase();
 
             if (normalized.indexOf("high") >= 0 || normalized.indexOf("高风险") >= 0 || normalized === "高") {
                 return "high";
             }
-            if (normalized.indexOf("medium") >= 0 || normalized.indexOf("中风险") >= 0 || normalized === "中") {
+            if (normalized.indexOf("medium") >= 0 || normalized.indexOf("中风险") >= 0 || normalized === "高") {
                 return "medium";
             }
-            if (normalized.indexOf("low") >= 0 || normalized.indexOf("低风险") >= 0 || normalized === "低") {
+            if (normalized.indexOf("low") >= 0 || normalized.indexOf("低风险") >= 0 || normalized === "高") {
                 return "low";
             }
             if (normalized.indexOf("safe") >= 0 || normalized.indexOf("norisk") >= 0
-                || normalized.indexOf("无风险") >= 0 || normalized === "无") {
+                || normalized.indexOf("无风险") >= 0 || normalized === "高") {
                 return "safe";
             }
             return "";
@@ -1164,20 +1637,20 @@
             if (resultText.indexOf("高风险") >= 0 || resultText.indexOf("风险等级：高") >= 0 || resultText.indexOf("风险等级:高") >= 0) {
                 return "high";
             }
-            if (resultText.indexOf("中风险") >= 0 || resultText.indexOf("风险等级：中") >= 0 || resultText.indexOf("风险等级:中") >= 0) {
+            if (resultText.indexOf("中风险") >= 0 || resultText.indexOf("风险等级：中") >= 0 || resultText.indexOf("风险等级:高") >= 0) {
                 return "medium";
             }
-            if (resultText.indexOf("低风险") >= 0 || resultText.indexOf("风险等级：低") >= 0 || resultText.indexOf("风险等级:低") >= 0) {
+            if (resultText.indexOf("低风险") >= 0 || resultText.indexOf("风险等级：低") >= 0 || resultText.indexOf("风险等级:高") >= 0) {
                 return "low";
             }
-            if (resultText.indexOf("无风险") >= 0 || resultText.indexOf("风险等级：无") >= 0 || resultText.indexOf("风险等级:无") >= 0) {
+            if (resultText.indexOf("无风险") >= 0 || resultText.indexOf("风险等级：无") >= 0 || resultText.indexOf("风险等级:高") >= 0) {
                 return "safe";
             }
             return "";
         }
 
         function getRiskDisplayLabel(riskKey) {
-            return riskFilterLabels[riskKey] || "未分析";
+            return riskFilterLabels[riskKey] || "未分级";
         }
 
         function formatFieldLabel(field) {
@@ -1265,8 +1738,8 @@
             }
 
             const normalized = raw.replace(/\r\n/g, "\n");
-            const reasonMatch = normalized.match(/风险原因[：:]\s*([\s\S]*?)(?=加固建议[：:]|建议[：:]|$)/);
-            const adviceMatch = normalized.match(/(?:加固建议|建议)[：:]\s*([\s\S]*)$/);
+            const reasonMatch = normalized.match(/风险原因[：]\s*([\s\S]*?)(?=加固建议[：]|建议[：]|$)/);
+            const adviceMatch = normalized.match(/(?:加固建议|建议)[：]\s*([\s\S]*)$/);
 
             const reasonText = reasonMatch ? reasonMatch[1].trim() : "";
             const adviceText = adviceMatch ? adviceMatch[1].trim() : "";
@@ -1359,11 +1832,11 @@
                         };
 
                         if (!payload.hostname) {
-                            layer.msg("请输入主机名");
+                            layer.msg("删除成功");
                             return;
                         }
                         if (!payload.macAddress) {
-                            layer.msg("请输入 MAC 地址");
+                            layer.msg("删除成功");
                             return;
                         }
 
@@ -1376,7 +1849,7 @@
                         })
                             .then(function () {
                                 layer.close(index);
-                                layer.msg("更新成功");
+                                layer.msg("删除成功");
                                 reloadTable(false);
                             })
                             .catch(function (error) {
@@ -1438,6 +1911,222 @@
                 + '</div>'
                 + '</div>';
         }
+
+        // ---- 资产导出功能 ----
+
+        function startAssetExport(host, assetType, assetMeta, progressBar) {
+            clearAssetExportPoll();
+
+            if (!progressBar) {
+                layer.msg("删除成功");
+                return;
+            }
+            progressBar.style.display = "block";
+            updateAssetExportProgress(progressBar, 0, "正在准备导出...");
+
+            layer.open({
+                type: 1,
+                title: "导出资产清单",
+                area: ["480px", "auto"],
+                shadeClose: true,
+                content: buildAssetExportFormatDialog(host, assetMeta),
+                success: function (layero, index) {
+                    var root = layero[0] || layero;
+                    root.querySelector(".export-cancel").addEventListener("click", function () {
+                        layer.close(index);
+                        progressBar.style.display = "none";
+                    });
+
+                    root.querySelector(".export-submit").addEventListener("click", function () {
+                        var selectedFormat = root.querySelector("input[name='exportFormat']:checked");
+                        var format = selectedFormat ? selectedFormat.value : "csv";
+                        layer.close(index);
+                        executeAssetExport(host, assetType, format, progressBar);
+                    });
+                },
+                cancel: function () {
+                    progressBar.style.display = "none";
+                }
+            });
+        }
+
+        function buildAssetExportFormatDialog(host, assetMeta) {
+            var assetLabel = assetMeta ? assetMeta.label : assetType;
+            return '<div class="export-dialog-shell">'
+                + '<div class="export-dialog-meta">'
+                + '<p>导出主机 <strong>' + PlatformUtils.escapeHtml(host.hostname || "未命名主机") + '</strong> 的最新<strong>' + PlatformUtils.escapeHtml(assetLabel) + '</strong> 资产清单</p>'
+                + '<p class="export-dialog-hint">数据已自动脱敏处理，密码和IP等敏感信息不会暴露完整内容。</p>'
+                + '</div>'
+                + '<div class="export-format-options">'
+                + '<label class="export-format-option">'
+                + '<input type="radio" name="exportFormat" value="csv" checked>'
+                + '<span class="export-format-card">'
+                + '<strong>CSV 表格</strong>'
+                + '<em>适合用Excel 打开查看和筛选</em>'
+                + '</span>'
+                + '</label>'
+                + '<label class="export-format-option">'
+                + '<input type="radio" name="exportFormat" value="json">'
+                + '<span class="export-format-card">'
+                + '<strong>JSON 数据</strong>'
+                + '<em>适合技术人员做进一步分析</em>'
+                + '</span>'
+                + '</label>'
+                + '<label class="export-format-option">'
+                + '<input type="radio" name="exportFormat" value="markdown">'
+                + '<span class="export-format-card">'
+                + '<strong>Markdown 文档</strong>'
+                + '<em>适合直接阅读，排版清晰规范</em>'
+                + '</span>'
+                + '</label>'
+                + '</div>'
+                + '<div class="page-form-actions">'
+                + '<button type="button" class="layui-btn page-secondary-btn export-cancel">取消</button>'
+                + '<button type="button" class="layui-btn page-btn export-submit">开始导出</button>'
+                + '</div>'
+                + '</div>';
+        }
+
+        function executeAssetExport(host, assetType, format, progressBar) {
+            clearAssetExportPoll();
+
+            updateAssetExportProgress(progressBar, 5, "正在连接服务...");
+
+            PlatformUtils.request("/api/assets/export", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hostId: host.id, assetType: assetType, format: format })
+            })
+            .then(function (task) {
+                currentExportTaskId = task.taskId;
+                pollAssetExportProgress(task.taskId, assetType, format, progressBar, host);
+            })
+            .catch(function (error) {
+                progressBar.innerHTML = "";
+                progressBar.style.display = "none";
+                layer.msg(error.message || "启动导出失败");
+            });
+        }
+
+        function pollAssetExportProgress(taskId, assetType, format, progressBar, host) {
+            exportPollTimer = setInterval(function () {
+                PlatformUtils.request("/api/assets/export/" + taskId)
+                    .then(function (task) {
+                        updateAssetExportProgress(progressBar, task.progress || 0, task.message || "处理...");
+
+                        if (task.status === "COMPLETED") {
+                            clearAssetExportPoll();
+                            onAssetExportComplete(task, assetType, format, progressBar, host);
+                        } else if (task.status === "FAILED") {
+                            clearAssetExportPoll();
+                            onAssetExportFailed(task, progressBar);
+                        }
+                    })
+                    .catch(function () {
+                    });
+            }, 1000);
+        }
+
+        function updateAssetExportProgress(progressBar, percent, message) {
+            progressBar.innerHTML = '<div class="export-progress-inner">'
+                + '<span class="export-progress-text">' + PlatformUtils.escapeHtml(message) + '</span>'
+                + '<div class="export-progress-percent">' + percent + '%</div>'
+                + '<div class="export-progress-track"><span style="width:' + percent + '%"></span></div>'
+                + '</div>';
+        }
+
+        function onAssetExportComplete(task, assetType, format, progressBar, host) {
+            setTimeout(function () {
+                if (progressBar) {
+                    progressBar.style.display = "none";
+                }
+            }, 1500);
+
+            var downloadUrl = "/api/assets/export/" + task.taskId + "/download";
+            fetch(downloadUrl, { method: "GET", headers: PlatformUtils.authHeaders() })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("Download failed: " + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(function (blob) {
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement("a");
+                    a.href = url;
+                    a.download = task.fileName || "export";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+                })
+                .catch(function (err) {
+                    console.error("Export download error:", err);
+                    layer.msg("删除成功");
+                });
+
+            var assetLabel = (assetTypeMap[assetType] ? assetTypeMap[assetType].label : assetType) || assetType;
+            var highRiskMsg = task.highRiskCount > 0
+                ? '其中 <span style="color:#e03131;font-weight:700">高风险项 ' + task.highRiskCount + ' </span>，请重点关注'
+                : '未发现高风险项';
+
+            var detailParts = [];
+            if (task.highRiskCount > 0) {
+                detailParts.push('<p>' + highRiskMsg + '</p>');
+            }
+            if (task.mediumRiskCount > 0) {
+                detailParts.push('<p>中风险项 <strong>' + task.mediumRiskCount + '</strong> 。</p>');
+            }
+            if (task.md5Hash) {
+                detailParts.push('<p class="export-result-md5">文件完整性校验（MD5）：<code>' + PlatformUtils.escapeHtml(task.md5Hash) + '</code></p>');
+            }
+
+            layer.open({
+                type: 1,
+                title: "清单导出完成",
+                area: ["460px", "auto"],
+                shadeClose: true,
+                content: '<div class="export-result-dialog">'
+                    + '<div class="export-result-summary">'
+                    + '<p>您导出的是<strong>' + PlatformUtils.escapeHtml(assetLabel) + '</strong> 资产清单</p>'
+                    + '<p>包含 <strong>' + task.totalRecords + '</strong> 条记录。</p>'
+                    + detailParts.join("")
+                    + '</div>'
+                    + '<div class="page-form-actions">'
+                    + '<button type="button" class="layui-btn page-btn" onclick="layui.layer.closeAll()">知道了</button>'
+                    + '</div>'
+                    + '</div>'
+            });
+        }
+
+        function onAssetExportFailed(task, progressBar) {
+            if (progressBar) {
+                progressBar.style.display = "none";
+            }
+            layer.confirm(
+                "导出失败：" + (task.message || "未知错误") + "。<br>要重新尝试导出吗？",
+                { title: "导出失败", btn: ["重试", "取消"] },
+                function (index) {
+                    layer.close(index);
+                    PlatformUtils.request("/api/assets/export/" + task.taskId + "/retry", { method: "POST" })
+                        .then(function (retryTask) {
+                            currentExportTaskId = retryTask.taskId;
+                            pollAssetExportProgress(retryTask.taskId, retryTask.assetType, retryTask.format, progressBar);
+                        })
+                        .catch(function (error) {
+                            layer.msg(error.message || "重试失败");
+                        });
+                }
+            );
+        }
+
+        function clearAssetExportPoll() {
+            if (exportPollTimer) {
+                clearInterval(exportPollTimer);
+                exportPollTimer = null;
+            }
+        }
+
     });
 </script>
 </body>

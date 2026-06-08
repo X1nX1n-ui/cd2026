@@ -2,6 +2,7 @@ package com.cd.controller;
 
 import com.cd.entity.Test;
 import com.cd.server.TestServer;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,28 +27,33 @@ public class TestController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('sys:test:manage')")
     public List<Test> list() {
         return testServer.list();
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('sys:test:manage')")
     public Test getById(@PathVariable Long id) {
         return testServer.getById(id);
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('sys:test:manage')")
     @ResponseStatus(HttpStatus.CREATED)
     public Test create(@RequestBody Test test) {
         return testServer.create(test);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAuthority('sys:test:manage')")
     public Test update(@PathVariable Long id, @RequestBody Test test) {
         test.setId(id);
         return testServer.update(test);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('sys:test:manage')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         testServer.deleteById(id);

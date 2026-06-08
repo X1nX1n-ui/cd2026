@@ -30,4 +30,5 @@ public interface HostMapper {
                                              @Param("status") String status);
 
     int deleteById(@Param("id") Long id);
+    List<Host> selectOnlineHosts();
 }

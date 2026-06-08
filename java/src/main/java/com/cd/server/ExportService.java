@@ -23,4 +23,6 @@ public interface ExportService {
      * Try to resume a previously failed or incomplete task.
      */
     ExportTask resumeTask(String taskId);
+
+    ExportTask startBatchExport(com.cd.entity.BatchExportRequest request, Long userId, boolean isAdmin);
 }

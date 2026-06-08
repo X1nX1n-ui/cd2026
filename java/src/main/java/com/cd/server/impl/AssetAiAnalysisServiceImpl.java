@@ -28,15 +28,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class AssetAiAnalysisServiceImpl implements AssetAiAnalysisService {
 
     private static final String DEFAULT_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
-    private static final String DEFAULT_MODEL = "qwen-plus";
+    private static final String DEFAULT_MODEL = "glm-5";
     private static final int DEFAULT_TIMEOUT_SECONDS = 180;
     private static final double DEFAULT_TEMPERATURE = 0.1d;
 
@@ -426,7 +428,7 @@ public class AssetAiAnalysisServiceImpl implements AssetAiAnalysisService {
         return result;
     }
 
-    private JSONArray analyzeItems(AssetAiMeta meta,
+        private JSONArray analyzeItems(AssetAiMeta meta,
                                    String fieldName,
                                    JSONArray items,
                                    String stageLabel,
@@ -434,34 +436,54 @@ public class AssetAiAnalysisServiceImpl implements AssetAiAnalysisService {
                                    int startProgress,
                                    int endProgress) {
         if (items == null || items.isEmpty()) {
-            reportProgress(progressReporter, "analyzing", stageLabel + "为空，跳过 AI 分析", endProgress);
+            reportProgress(progressReporter, "analyzing", stageLabel + "????? AI ??", endProgress);
             return new JSONArray();
         }
 
-        JSONArray merged = new JSONArray();
         int batchSize = readIntEnv("AI_ANALYSIS_BATCH_SIZE", meta.batchSize());
         List<JSONArray> batches = splitBatches(items, Math.max(batchSize, 1));
         int totalBatches = batches.size();
-        for (int index = 0; index < totalBatches; index++) {
-            JSONArray batch = batches.get(index);
-            int batchProgress = startProgress + (int) Math.round(((index * 1.0d) / Math.max(totalBatches, 1)) * (endProgress - startProgress));
-            reportProgress(
-                    progressReporter,
-                    "analyzing",
-                    stageLabel + " AI 分析中（" + (index + 1) + "/" + totalBatches + "）",
-                    batchProgress
-            );
-            Object modelResult = callDashScope(meta, fieldName, batch);
-            JSONArray analyzedBatch = extractResultArray(modelResult, fieldName);
-            for (Object item : analyzedBatch) {
-                merged.add(item);
+
+        // Parallel analysis with limited concurrency (env: AI_ANALYSIS_PARALLELISM, default 3)
+        int parallelism = Math.min(totalBatches, readIntEnv("AI_ANALYSIS_PARALLELISM", 3));
+        ExecutorService parallelExecutor = Executors.newFixedThreadPool(parallelism);
+        try {
+            List<CompletableFuture<JSONArray>> futures = new ArrayList<>();
+            for (int idx = 0; idx < totalBatches; idx++) {
+                final int index = idx;
+                CompletableFuture<JSONArray> future = CompletableFuture.supplyAsync(() -> {
+                    JSONArray batch = batches.get(index);
+                    reportProgress(
+                            progressReporter,
+                            "analyzing",
+                            stageLabel + " AI ????" + (index + 1) + "/" + totalBatches + "?",
+                            startProgress + (int) Math.round(((index * 1.0d) / Math.max(totalBatches, 1)) * (endProgress - startProgress))
+                    );
+                    Object modelResult = callDashScope(meta, fieldName, batch);
+                    return extractResultArray(modelResult, fieldName);
+                }, parallelExecutor);
+                futures.add(future);
             }
+
+            JSONArray merged = new JSONArray();
+            for (int i = 0; i < futures.size(); i++) {
+                try {
+                    JSONArray analyzedBatch = futures.get(i).get(300, TimeUnit.SECONDS);
+                    for (Object item : analyzedBatch) {
+                        merged.add(item);
+                    }
+                } catch (Exception ex) {
+                    throw new BusinessException(stageLabel + " AI ????: " + ex.getMessage());
+                }
+            }
+            reportProgress(progressReporter, "analyzing", stageLabel + " AI ????", endProgress);
+            return merged;
+        } finally {
+            parallelExecutor.shutdownNow();
         }
-        reportProgress(progressReporter, "analyzing", stageLabel + " AI 分析完成", endProgress);
-        return merged;
     }
 
-    private void runAnalyzeTask(AnalyzeTaskState taskState, Host host, String assetType) {
+private void runAnalyzeTask(AnalyzeTaskState taskState, Host host, String assetType) {
         try {
             AssetSnapshotView snapshotView = analyzeLatestSnapshot(host, assetType, taskState::update);
             taskState.setStatus("success");

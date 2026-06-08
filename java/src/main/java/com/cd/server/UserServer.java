@@ -44,4 +44,8 @@ public interface UserServer {
      * @param verificationCode ?????
      */
     void changePassword(Long userId, String oldPassword, String newPassword, String verificationCode);
+
+    void sendPasswordResetCode(String username);
+
+    void resetPassword(String username, String code, String newPassword);
 }

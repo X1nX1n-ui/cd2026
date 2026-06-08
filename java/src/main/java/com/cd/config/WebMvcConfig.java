@@ -46,6 +46,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         String uploadLocation = Paths.get(uploadDir).toAbsolutePath().normalize().toUri().toString();
         registry.addResourceHandler("/uploads/**")
-                .addResourceLocations(uploadLocation.endsWith("/") ? uploadLocation : uploadLocation + "/");
+                .addResourceLocations(uploadLocation.endsWith("/") ? uploadLocation : uploadLocation + "/")
+                .setCachePeriod(0);
+        registry.addResourceHandler("/pages/**", "/js/**", "/css/**", "/font/**", "/vendor/**")
+                .addResourceLocations("classpath:/static/pages/", "classpath:/static/js/", "classpath:/static/css/", "classpath:/static/font/", "classpath:/static/vendor/")
+                .setCachePeriod(0);
     }
 }

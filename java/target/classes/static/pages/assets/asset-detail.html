@@ -1,11 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>资产详情</title>
-    <link rel="stylesheet" href="https://cdn.staticfile.net/layui/2.9.13/css/layui.css">
-    <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/css/layui.css?v=3">
+    <link rel="stylesheet" href="/css/app.css?v=3">
 </head>
 <body class="app-body">
 <div class="page-shell">
@@ -41,8 +41,8 @@
     </div>
 </div>
 
-<script src="https://cdn.staticfile.net/layui/2.9.13/layui.js"></script>
-<script src="/js/common.js"></script>
+<script src="/js/layui.js?v=3"></script>
+<script src="/js/common.js?v=3"></script>
 <script>
     layui.use(["layer"], function () {
         const layer = layui.layer;
@@ -117,8 +117,17 @@
 
         function bindEvents() {
             refreshButton.addEventListener("click", function () {
-                loadDetail();
-            });
+            loadDetail();
+        });
+
+        // Auto-refresh every 60 seconds so user always sees latest probe results
+        var autoRefreshInterval = setInterval(function () {
+            if (document.hidden) return; // Don't refresh when tab is in background
+            loadDetail();
+        }, 60000);
+        window.addEventListener("beforeunload", function () {
+            clearInterval(autoRefreshInterval);
+        });
 
             exportButton.addEventListener("click", function () {
                 openExportDialog();
@@ -169,7 +178,7 @@
                 + '</div>'
                 + '<div class="asset-hero-meta">'
                 + renderMetricCard("主机状态", PlatformUtils.renderHostStatus(host.status), true)
-                + renderMetricCard("最后上报", PlatformUtils.formatDateTime(host.lastSeenAt))
+                + renderMetricCard("最后上线", PlatformUtils.formatDateTime(host.lastSeenAt))
                 + renderMetricCard("系统", host.osName || host.osDetail || "--")
                 + '</div>';
         }
@@ -236,7 +245,7 @@
         function renderArraySection(title, items, options) {
             const config = options || {};
             const suffix = typeof config.filteredCount === "number"
-                ? '（当前显示 ' + config.filteredCount + ' / ' + (config.totalCount || 0) + '）'
+                ? '（当前显示' + config.filteredCount + ' / ' + (config.totalCount || 0) + '
                 : '';
             return ''
                 + '<div class="asset-array-section">'
@@ -263,7 +272,7 @@
                 : '';
             return '<article class="asset-object-card">'
                 + '<header>'
-                + '<span>第 ' + (index + 1) + ' 项</span>'
+                + '<span>' + (index + 1) + ' </span>'
                 + riskBadge
                 + '</header>'
                 + '<div class="asset-object-fields">'
@@ -288,7 +297,7 @@
             if (value === null || value === undefined || value === "") {
                 return '<span class="asset-value-muted">--</span>';
             }
-            if (typeof value === "string" && (value.indexOf("风险原因") >= 0 || value.indexOf("加固建议") >= 0 || value.indexOf("建议：") >= 0)) {
+            if (typeof value === "string" && (value.indexOf("风险原因") >= 0 || value.indexOf("加固建议") >= 0 || value.indexOf("建议") >= 0)) {
                 return formatAnalysisResult(value);
             }
             if (Array.isArray(value) || typeof value === "object") {
@@ -410,7 +419,7 @@
 
             const normalized = raw
                 .replace(/\s+/g, "")
-                .replace(/[：:，,。；;！!？?]/g, "")
+                .replace(/[。；;]/g, "")
                 .toLowerCase();
 
             if (normalized.indexOf("high") >= 0 || normalized.indexOf("高风险") >= 0 || normalized === "高") {
@@ -458,12 +467,12 @@
         }
 
         function getRiskDisplayLabel(riskKey) {
-            return riskFilterLabels[riskKey] || "未分析";
+            return riskFilterLabels[riskKey] || "未分级";
         }
 
         function formatFieldLabel(field) {
             const fieldMap = {
-                name: "账号名",
+                name: "账号",
                 Name: "名称",
                 enabled: "启用状态",
                 Enabled: "启用状态",
@@ -595,7 +604,7 @@
         function buildExportDialog(hostname, typeLabel, assetType) {
             return '<div class="export-dialog-shell">'
                 + '<div class="export-dialog-meta">'
-                + '<p>导出主机 <strong>' + PlatformUtils.escapeHtml(hostname) + '</strong> 的 <strong>' + PlatformUtils.escapeHtml(typeLabel) + '</strong> 资产清单</p>'
+                + '<p>导出主机 <strong>' + PlatformUtils.escapeHtml(hostname) + '</strong> <strong>' + PlatformUtils.escapeHtml(typeLabel) + '</strong> 资产清单</p>'
                 + '<p class="export-dialog-hint">数据已自动脱敏处理，密码和IP等敏感信息不会暴露完整内容。</p>'
                 + '</div>'
                 + '<div class="export-format-options">'
@@ -603,7 +612,7 @@
                 + '<input type="radio" name="exportFormat" value="csv" checked>'
                 + '<span class="export-format-card">'
                 + '<strong>CSV 表格</strong>'
-                + '<em>适合用 Excel 打开查看和筛选</em>'
+                + '<em>适合Excel 打开查看和筛选</em>'
                 + '</span>'
                 + '</label>'
                 + '<label class="export-format-option">'
@@ -668,14 +677,14 @@
                         }
                     })
                     .catch(function () {
-                        // 网络波动时静默重试
+                        // 网络波动时静默重
                     });
             }, 1000);
         }
 
         function updateExportProgress(task) {
             var percent = task.progress || 0;
-            var message = task.message || "处理中...";
+            var message = task.message || "处理..";
             exportProgressBar.innerHTML = '<div class="export-progress-inner">'
                 + '<span class="export-progress-text">' + PlatformUtils.escapeHtml(message) + '</span>'
                 + '<div class="export-progress-percent">' + percent + '%</div>'
@@ -698,7 +707,7 @@
 
             var assetLabel = assetConfigs[assetType] ? assetConfigs[assetType].label : assetType;
             var highRiskMsg = task.highRiskCount > 0
-                ? '其中 <span style="color:#e03131;font-weight:700">高风险项 ' + task.highRiskCount + ' 条</span>，请重点关注'
+                ? '其中 <span style="color:#e03131;font-weight:700">高风险项 ' + task.highRiskCount + ' </span>，请重点关注'
                 : '未发现高风险项';
 
             layer.open({
@@ -708,8 +717,8 @@
                 shadeClose: true,
                 content: '<div class="export-result-dialog">'
                     + '<div class="export-result-summary">'
-                    + '<p>您导出的是 <strong>' + PlatformUtils.escapeHtml(assetLabel) + '</strong> 资产清单</p>'
-                    + '<p>包含 <strong>' + task.totalRecords + '</strong> 条记录</p>'
+                    + '<p>您导出的<strong>' + PlatformUtils.escapeHtml(assetLabel) + '</strong> 资产清单</p>'
+                    + '<p>包含 <strong>' + task.totalRecords + '</strong> 条记。</p>'
                     + '<p>' + highRiskMsg + '</p>'
                     + (task.md5Hash ? '<p class="export-result-md5">文件完整性校验（MD5）：<code>' + PlatformUtils.escapeHtml(task.md5Hash) + '</code></p>' : '')
                     + '</div>'
@@ -723,7 +732,7 @@
         function onExportFailed(task) {
             exportProgressBar.style.display = "none";
             layer.confirm(
-                "导出失败：" + (task.message || "未知错误") + "。<br>要重新尝试导出吗？",
+                "导出失败 + (task.message || "未知错误") + "br>要重新尝试导出吗,
                 { title: "导出失败", btn: ["重试", "取消"] },
                 function (index) {
                     layer.close(index);

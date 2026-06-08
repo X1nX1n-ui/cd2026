@@ -1,4 +1,4 @@
-﻿server:
+server:
   port: 8080
 
 spring:
@@ -51,7 +51,11 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 
+
 app:
+  probe:
+    auto-probe-enabled: true
+    auto-probe-cron: "0 */5 * * * ?"
   upload-dir: uploads
   database:
     initialize-on-startup: true

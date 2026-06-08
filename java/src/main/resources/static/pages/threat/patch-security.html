@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>补丁安全</title>
+    <link rel="stylesheet" href="/css/layui.css?v=3">
+    <link rel="stylesheet" href="/css/app.css?v=3">
+<style>
+.ps-page { padding: 20px 24px; }
+.ps-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; flex-wrap: wrap; }
+.ps-toolbar h1 { margin: 0; font-size: 22px; font-weight: 600; color: var(--color-text); }
+.ps-toolbar-actions { display: flex; gap: 8px; align-items: center; }
+.ps-toolbar-actions input { background: var(--color-surface-muted); color: #e1e2eb; border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; padding: 7px 12px; font-size: 13px; outline: none; width: 180px; }
+.ps-toolbar-actions input:focus { border-color: var(--color-primary); }
+.ps-table-wrap { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; }
+.ps-table { width: 100%; border-collapse: collapse; }
+.ps-table th { text-align: left; padding: 12px 16px; font-size: 12px; font-weight: 600; color: #8c909f; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.15); }
+.ps-table td { padding: 12px 16px; font-size: 14px; color: var(--color-text); border-bottom: 1px solid rgba(255,255,255,0.04); }
+.ps-table tr:hover td { background: rgba(255,255,255,0.02); }
+.ps-table tr:last-child td { border-bottom: none; }
+.ps-empty { padding: 64px 32px; text-align: center; color: #8c909f; }
+.ps-badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.ps-badge-critical { background: rgba(224,49,49,0.15); color: #e03131; border: 1px solid rgba(224,49,49,0.25); }
+.ps-badge-high { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
+.ps-badge-medium { background: rgba(79,134,247,0.15); color: #78a4ff; border: 1px solid rgba(79,134,247,0.25); }
+.ps-badge-low { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.25); }
+.ps-counts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ps-count { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: rgba(255,255,255,0.04); color: #b0b5c6; }
+.ps-count.c { color: #e03131; background: rgba(224,49,49,0.08); }
+.ps-count.h { color: #f59e0b; background: rgba(245,158,11,0.08); }
+.ps-count.m { color: #78a4ff; background: rgba(79,134,247,0.08); }
+.ps-count.l { color: #22c55e; background: rgba(34,197,94,0.08); }
+.ps-score { font-weight: 700; font-size: 16px; }
+.ps-score.critical { color: #e03131; }
+.ps-score.high { color: #f59e0b; }
+.ps-score.medium { color: #78a4ff; }
+.ps-score.low { color: #22c55e; }
+.ps-link { color: #78a4ff; cursor: pointer; text-decoration: none; font-size: 13px; }
+.ps-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body class="app-body">
+<div class="page-shell"><div class="ps-page">
+    <div class="ps-toolbar">
+        <h1>补丁安全</h1>
+        <div class="ps-toolbar-actions">
+            <input type="text" id="searchInput" placeholder="搜索主机名或IP...">
+            <button type="button" class="layui-btn layui-btn-primary layui-btn-sm" id="strategyBtn">扫描策略</button>
+            <button type="button" class="layui-btn layui-btn-normal layui-btn-sm" id="refreshBtn" style="background:#4f86f7;border-color:#4f86f7;color:#fff">刷新列表</button> <button type="button" class="layui-btn layui-btn-sm" id="exportBtn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e1e2eb">导出报告</button>
+        </div>
+    </div>
+
+    <div class="ps-table-wrap">
+        <table class="ps-table">
+            <thead><tr><th>主机名</th><th>IP 地址</th><th>操作系统</th><th>在线状态</th><th>风险评分</th><th>风险等级</th><th>风险明细</th><th>分析时间</th><th>操作</th></tr></thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+        <div class="ps-empty" id="emptyState" style="display:none"><p>暂无可显示的主机</p></div>
+        <div class="ps-empty" id="loadingState"><p>加载中...</p></div>
+    </div>
+</div></div>
+
+<script src="/js/common.js?v=3"></script>
+<script>
+(function () {
+    "use strict";
+    var searchTimer;
+
+    function esc(s) { if (!s) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+    function toast(msg, icon) {
+        try { if (parent && parent.layui && parent.layui.layer) parent.layui.layer.msg(msg, {icon:icon||1}); else alert(msg); } catch(e) { alert(msg); }
+    }
+
+    // ===== Bindings =====
+    document.getElementById("strategyBtn").addEventListener("click", function(e) { e.preventDefault(); openDialog(); });
+    document.getElementById("refreshBtn").addEventListener("click", function(e) { e.preventDefault(); loadHostList(); });
+    document.getElementById("exportBtn").addEventListener("click", function(e) { e.preventDefault(); exportReport(); });
+    document.getElementById("searchInput").addEventListener("input", function() { clearTimeout(searchTimer); searchTimer = setTimeout(loadHostList, 300); });
+    loadHostList();
+
+    // ===== Load all hosts with analysis data =====
+    function loadHostList() {
+        var kw = document.getElementById("searchInput").value.trim();
+        document.getElementById("loadingState").style.display = "block";
+        document.getElementById("emptyState").style.display = "none";
+        var url = "/api/patch-analysis/all-hosts";
+        if (kw) url += "?keyword=" + encodeURIComponent(kw);
+        var token = PlatformUtils.getToken();
+        if (!token) {
+            document.getElementById("loadingState").style.display = "none";
+            document.getElementById("emptyState").innerHTML = '<p>未登录</p><p style="font-size:12px;margin-top:4px;color:#6b7280">请先登录系统</p>';
+            document.getElementById("emptyState").style.display = "block";
+            return;
+        }
+        PlatformUtils.request(url).then(function(res) {
+            var hosts = Array.isArray(res) ? res : (res && res.records) ? res.records : [];
+            renderHostTable(hosts);
+        }).catch(function(e) {
+            console.error("[PATCH-SEC] load failed:", e);
+            document.getElementById("loadingState").style.display = "none";
+            document.getElementById("emptyState").style.display = "block";
+            if (e.message && e.message.indexOf("401") >= 0) {
+                document.getElementById("emptyState").innerHTML = '<p>登录已过期</p><p style="font-size:12px;margin-top:4px;color:#6b7280">请重新登录</p>';
+            }
+        });
+    }
+
+    function renderHostTable(hosts) {
+        document.getElementById("loadingState").style.display = "none";
+        var tb = document.getElementById("tableBody");
+        if (!hosts.length) { tb.innerHTML = ""; document.getElementById("emptyState").style.display = "block"; return; }
+        document.getElementById("emptyState").style.display = "none";
+        var lvlMap = { critical:"严重", high:"高危", medium:"中危", low:"低危" };
+        tb.innerHTML = hosts.map(function(h) {
+            var lvl = h.riskLevel || "low";
+            var score = h.riskScore || 0;
+            var cnts = (h.criticalCount>0?'<span class="ps-count c">严重'+h.criticalCount+'</span>':'')
+                + (h.highCount>0?'<span class="ps-count h">高危'+h.highCount+'</span>':'')
+                + (h.mediumCount>0?'<span class="ps-count m">中危'+h.mediumCount+'</span>':'')
+                + (h.lowCount>0?'<span class="ps-count l">低危'+h.lowCount+'</span>':'');
+            if (!cnts) cnts = '<span style="font-size:12px;color:#5a6380">暂无</span>';
+            var statusTxt = parseInt(h.status) === 1 || h.status === true || h.status === '1' ? '<span style="color:#34d399">在线</span>' : '<span style="color:#69738a">下线</span>';
+            var t = h.analyzedAt ? h.analyzedAt.replace("T"," ").substring(0,16) : "--";
+            return '<tr><td>'+esc(h.hostName||h.hostname||"--")+'</td><td>'+esc(h.ipAddress||h.ip_address||"--")+'</td><td style="font-size:12px;color:#8c909f">'+esc(h.osName||h.os_name||"")+" "+esc(h.osVersion||h.os_version||"")+'</td><td>'+statusTxt+'</td><td><span class="ps-score '+lvl+'">'+score+'</span></td><td><span class="ps-badge ps-badge-'+lvl+'">'+(lvlMap[lvl]||lvl)+'</span></td><td><div class="ps-counts">'+cnts+'</div></td><td style="font-size:12px;color:#8c909f">'+t+'</td><td><a class="ps-link" href="javascript:void(0)" onclick="window._openAnalysis('+h.hostId+')">查看详情</a></td></tr>';
+        }).join("");
+    }
+
+    window._openAnalysis = function(id) {
+        try {
+            if (parent && parent.layui && parent.layui.element) {
+                parent.layui.element.tabAdd("mainTabs", { title:"补丁分析", content:'<iframe src="/pages/threat/patch-analysis.html?hostId='+id+'" frameborder="0" style="width:100%;height:100%"></iframe>', id:"tab-patch-analysis-"+id });
+                parent.layui.element.tabChange("mainTabs", "tab-patch-analysis-"+id);
+            }
+        } catch(e) {}
+    };
+
+    // ===== Strategy Dialog =====
+    var PRESETS = [
+        {l:"每5分钟",  c:"0 */5 * * * ?"},
+        {l:"每15分钟", c:"0 */15 * * * ?"},
+        {l:"每30分钟", c:"0 */30 * * * ?"},
+        {l:"每1小时",  c:"0 0 */1 * * ?"},
+        {l:"每6小时",  c:"0 0 */6 * * ?"},
+        {l:"每12小时", c:"0 0 */12 * * ?"},
+        {l:"每天零点", c:"0 0 0 * * ?"},
+        {l:"每周一",   c:"0 0 0 * * 1"}
+    ];
+
+    function openDialog() {
+        var pLayer;
+        try { pLayer = parent.layui.layer; } catch(e) { alert("无法打开弹窗，请确保页面在后台框架中加载"); return; }
+
+        // Load config + hosts
+        var p1 = PlatformUtils.request("/api/patch-security/strategy");
+        var p2 = PlatformUtils.request("/api/hosts/page?pageSize=500");
+        Promise.all([p1, p2]).then(function(results) {
+            var cfg = results[0] || {};
+            var hosts = (results[1] && results[1].records) ? results[1].records : [];
+            showDialog(pLayer, cfg, hosts);
+        }).catch(function(e) {
+            console.error("[PATCH-SEC] Failed:", e);
+            toast("加载配置失败: " + (e.message || "网络错误"), 2);
+        });
+    }
+
+    function showDialog(pLayer, cfg, hosts) {
+        var en = cfg.enabled === 1 || cfg.enabled === true;
+        var cron = cfg.cronExpression || "0 0 */6 * * ?";
+        var tt = cfg.targetType || "all_online";
+        var to = cfg.timeoutMinutes || 10;
+        var cc = cfg.concurrency || 20;
+        var rt = cfg.retryCount || 3;
+        var ai = cfg.aiAnalysisEnabled !== 0 && cfg.aiAnalysisEnabled !== false;
+
+        // Find cron label
+        var cronLabel = "";
+        for (var i = 0; i < PRESETS.length; i++) { if (PRESETS[i].c === cron) { cronLabel = PRESETS[i].l; break; } }
+        if (!cronLabel) cronLabel = "自定义";
+
+        // Build host options
+        var hostOpts = "";
+        for (var j = 0; j < hosts.length; j++) {
+            hostOpts += '<option value="'+hosts[j].id+'">'+esc(hosts[j].hostname||"--")+" ("+esc(hosts[j].ipAddress||"--")+")</option>";
+        }
+
+        var h = '<div class="ps-dlg">';
+
+        // Card 1 - toggle + meta
+        h += '<div class="ps-dlg-card">';
+        h += '<div class="ps-dlg-card-hd">补丁扫描策略<em>定期扫描终端已安装补丁，结合漏洞知识库分析安全风险</em></div>';
+        h += '<div class="ps-dlg-card-bd">';
+        h += '<div class="ps-dlg-row between">';
+        h += '<label class="ps-switch"><input type="checkbox" id="chkEnabled"'+(en?' checked':'')+'><span class="ps-sw-track"><span class="ps-sw-thumb"></span></span><span class="ps-sw-lbl" id="lblEnabled">'+(en?'开启':'关闭')+'</span></label>';
+        h += '<div class="ps-dlg-meta">';
+        h += '<div><div class="ps-mlbl">最近执行</div><div class="ps-mval">'+esc(cfg.lastExecutedAt||"--")+'</div></div>';
+        h += '<div><div class="ps-mlbl">下次执行</div><div class="ps-mval">'+esc(cfg.nextExecutionAt||"--")+'</div></div>';
+        h += '</div></div></div></div>';
+
+        // Card 2 - scope
+        h += '<div class="ps-dlg-card">';
+        h += '<div class="ps-dlg-card-hd">扫描范围</div>';
+        h += '<div class="ps-dlg-card-bd">';
+        h += '<div class="ps-chip-row" id="scopeChips">';
+        h += '<span class="ps-chip'+(tt==="all_online"?' active':'')+'" data-type="all_online">全部在线主机</span>';
+        h += '<span class="ps-chip'+(tt==="selected"?' active':'')+'" data-type="selected">指定主机</span>';
+        h += '</div>';
+        h += '<div id="hostSelectArea" style="display:'+(tt==="selected"?'block':'none')+'">';
+        h += '<select id="hostSelect" multiple class="ps-hsel">'+hostOpts+'</select>';
+        h += '</div></div></div>';
+
+        // Card 3 - period
+        h += '<div class="ps-dlg-card">';
+        h += '<div class="ps-dlg-card-hd">执行周期</div>';
+        h += '<div class="ps-dlg-card-bd">';
+        h += '<div class="ps-chip-row" id="cronChips">';
+        for (var k = 0; k < PRESETS.length; k++) {
+            h += '<span class="ps-chip'+(cron===PRESETS[k].c?' active':'')+'" data-cron="'+esc(PRESETS[k].c)+'">'+PRESETS[k].l+'</span>';
+        }
+        h += '</div></div></div>';
+
+        // Card 4 - advanced (collapsible)
+        h += '<div class="ps-fold">';
+        h += '<div class="ps-fold-hd" id="advHd"><span class="ps-fold-arr">&#9654;</span> 高级配置</div>';
+        h += '<div class="ps-fold-bd" id="advBd">';
+        h += '<div style="display:flex;gap:14px;flex-wrap:wrap">';
+        h += '<div style="flex:1;min-width:150px"><div class="ps-num-lbl">扫描超时（分钟）</div><input type="number" class="ps-num" id="numTimeout" value="'+to+'" min="1" max="120"></div>';
+        h += '<div style="flex:1;min-width:150px"><div class="ps-num-lbl">并发扫描数</div><input type="number" class="ps-num" id="numConcurrency" value="'+cc+'" min="1" max="100"></div>';
+        h += '<div style="flex:1;min-width:150px"><div class="ps-num-lbl">失败重试次数</div><input type="number" class="ps-num" id="numRetry" value="'+rt+'" min="0" max="10"></div>';
+        h += '<div style="flex:1;min-width:150px;display:flex;flex-direction:column;justify-content:flex-end">';
+        h += '<label class="ps-switch"><input type="checkbox" id="chkAi"'+(ai?' checked':'')+'><span class="ps-sw-track"><span class="ps-sw-thumb"></span></span><span class="ps-sw-lbl">AI分析</span></label>';
+        h += '<div class="ps-hint">扫描完成后自动触发AI安全分析</div>';
+        h += '</div></div></div></div>';
+
+        // Card 5 - status
+        var scopeLabel = tt==="selected" ? "指定主机" : "全部在线主机";
+        var estCount = tt==="all_online" ? hosts.length : 0;
+        h += '<div class="ps-dlg-card">';
+        h += '<div class="ps-dlg-card-hd">策略状态</div>';
+        h += '<div class="ps-dlg-card-bd">';
+        h += '<div class="ps-stats" id="statusGrid">';
+        h += '<div class="ps-stat"><div class="ps-slbl">状态</div><div class="ps-sval'+(en?' green':'')+'">'+(en?'已启用':'已暂停')+'</div></div>';
+        h += '<div class="ps-stat"><div class="ps-slbl">扫描范围</div><div class="ps-sval">'+scopeLabel+'</div></div>';
+        h += '<div class="ps-stat"><div class="ps-slbl">执行周期</div><div class="ps-sval">'+cronLabel+'</div></div>';
+        h += '<div class="ps-stat"><div class="ps-slbl">预计扫描</div><div class="ps-sval">'+(cfg.estimatedHostCount||estCount||hosts.length)+'台</div></div>';
+        h += '</div></div></div>';
+
+        // Footer
+        h += '<div class="ps-ft">';
+        h += '<button type="button" class="ps-btn ps-btn1" id="btnExecNow">立即执行一次</button>';
+        h += '<div class="ps-ft-r">';
+        h += '<button type="button" class="ps-btn ps-btn2" id="btnCancel">取消</button>';
+        h += '<button type="button" class="ps-btn ps-btn1" id="btnSave">保存配置</button>';
+        h += '</div></div></div>';
+
+        var di = pLayer.open({
+            type: 1,
+            title: "补丁扫描策略配置",
+            area: ["900px", "auto"],
+            shadeClose: false,
+            content: h,
+            success: function(ly) {
+                bindEvents(ly, di, hosts, cfg, pLayer);
+            }
+        });
+    }
+
+    function bindEvents(ly, di, hosts, oc, pLayer) {
+        var bd = ly.find(".layui-layer-content")[0];
+        if (!bd) return;
+
+        var st = {
+            enabled: bd.querySelector("#chkEnabled").checked,
+            cron: oc.cronExpression || "0 0 */6 * * ?",
+            targetType: oc.targetType || "all_online"
+        };
+
+        function refreshStats() {
+            var sc = st.targetType==="selected" ? "指定主机" : "全部在线主机";
+            var cl = "";
+            for (var i = 0; i < PRESETS.length; i++) { if (PRESETS[i].c === st.cron) { cl = PRESETS[i].l; break; } }
+            if (!cl) cl = "自定义";
+            var ec = st.targetType==="all_online" ? hosts.length : 0;
+            var sg = bd.querySelector("#statusGrid");
+            if (!sg) return;
+            sg.innerHTML = '<div class="ps-stats">'
+                + '<div class="ps-stat"><div class="ps-slbl">状态</div><div class="ps-sval'+(st.enabled?' green':'')+'">'+(st.enabled?'已启用':'已暂停')+'</div></div>'
+                + '<div class="ps-stat"><div class="ps-slbl">扫描范围</div><div class="ps-sval">'+esc(sc)+'</div></div>'
+                + '<div class="ps-stat"><div class="ps-slbl">执行周期</div><div class="ps-sval">'+esc(cl)+'</div></div>'
+                + '<div class="ps-stat"><div class="ps-slbl">预计扫描</div><div class="ps-sval">'+(oc.estimatedHostCount||ec||hosts.length)+'台</div></div>'
+                + '</div>';
+        }
+
+        // Enable switch
+        var ce = bd.querySelector("#chkEnabled");
+        var swl = bd.querySelector("#lblEnabled");
+        if (ce) ce.addEventListener("change", function() {
+            st.enabled = this.checked;
+            if (swl) swl.textContent = this.checked ? "开启" : "关闭";
+            refreshStats();
+        });
+
+        // Scope chips
+        bd.querySelectorAll("#scopeChips .ps-chip").forEach(function(chip) {
+            chip.addEventListener("click", function() {
+                bd.querySelectorAll("#scopeChips .ps-chip").forEach(function(c) { c.classList.remove("active"); });
+                this.classList.add("active");
+                st.targetType = this.getAttribute("data-type");
+                var hsa = bd.querySelector("#hostSelectArea");
+                if (hsa) hsa.style.display = st.targetType === "selected" ? "block" : "none";
+                refreshStats();
+            });
+        });
+
+        // Cron chips
+        bd.querySelectorAll("#cronChips .ps-chip").forEach(function(chip) {
+            chip.addEventListener("click", function() {
+                bd.querySelectorAll("#cronChips .ps-chip").forEach(function(c) { c.classList.remove("active"); });
+                this.classList.add("active");
+                st.cron = this.getAttribute("data-cron");
+                refreshStats();
+            });
+        });
+
+        // Advanced fold
+        var ah = bd.querySelector("#advHd");
+        var ab = bd.querySelector("#advBd");
+        if (ah) ah.addEventListener("click", function() {
+            var open = ab.classList.toggle("show");
+            ah.classList.toggle("open", open);
+        });
+
+        // Cancel
+        var btnCancel = bd.querySelector("#btnCancel");
+        if (btnCancel) btnCancel.addEventListener("click", function() { pLayer.close(di); });
+
+        // Execute now with progress polling
+        var btnExec = bd.querySelector("#btnExecNow");
+        if (btnExec) btnExec.addEventListener("click", function() {
+            var btn = this;
+            btn.disabled = true;
+            btn.textContent = "下发中...";
+            PlatformUtils.request("/api/patch-security/execute-now", { method:"POST" }).then(function(res) {
+                var taskId = res.taskId;
+                toast("扫描指令已下发，正在等待主机返回数据...", 1);
+                btn.textContent = "扫描中...";
+                // Start polling for progress
+                var pollCount = 0;
+                var maxPolls = 60; // Max 3 minutes
+                var pollTimer = setInterval(function() {
+                    pollCount++;
+                    PlatformUtils.request("/api/patch-security/scan-progress/" + taskId).then(function(prog) {
+                        var pct = prog.progress || 0;
+                        btn.textContent = prog.stageText + " (" + pct + "%)";
+                        if (prog.status === "COMPLETED" || prog.status === "FAILED" || pollCount >= maxPolls) {
+                            clearInterval(pollTimer);
+                            btn.disabled = false;
+                            btn.textContent = "立即执行一次";
+                            if (prog.status === "COMPLETED") {
+                                toast("扫描与分析完成！共处理 " + (prog.patchCount || 0) + " 条补丁", 1);
+                                loadHostList();
+                            } else if (prog.status === "FAILED") {
+                                toast("扫描失败: " + (prog.message || "未知错误"), 2);
+                            } else {
+                                toast("扫描超时，请刷新页面查看结果", 2);
+                                loadHostList();
+                            }
+                        }
+                    }).catch(function() {
+                        // Keep polling on intermittent errors
+                    });
+                }, 3000);
+            }).catch(function(e) {
+                toast("执行失败: " + (e.message || "网络错误"), 2);
+                btn.disabled = false;
+                btn.textContent = "立即执行一次";
+            });
+        });
+
+        // Save
+        var btnSave = bd.querySelector("#btnSave");
+        if (btnSave) btnSave.addEventListener("click", function() {
+            var btn = this;
+            btn.disabled = true;
+            btn.textContent = "保存中...";
+
+            var config = {
+                enabled: st.enabled ? 1 : 0,
+                cronExpression: st.cron,
+                targetType: st.targetType,
+                targetHostIds: null,
+                timeoutMinutes: parseInt(bd.querySelector("#numTimeout").value) || 10,
+                concurrency: parseInt(bd.querySelector("#numConcurrency").value) || 20,
+                retryCount: parseInt(bd.querySelector("#numRetry").value) || 3,
+                aiAnalysisEnabled: bd.querySelector("#chkAi").checked ? 1 : 0
+            };
+
+            if (st.targetType === "selected") {
+                var sel = bd.querySelector("#hostSelect");
+                if (sel) {
+                    var ids = [];
+                    for (var i = 0; i < sel.selectedOptions.length; i++) { ids.push(sel.selectedOptions[i].value); }
+                    config.targetHostIds = ids.join(",");
+                }
+            }
+
+            PlatformUtils.request("/api/patch-security/strategy", {
+                method: "PUT",
+                headers: {"Content-Type":"application/json"},
+                body: JSON.stringify(config)
+            }).then(function() {
+                pLayer.close(di);
+                toast("策略保存成功", 1);
+            }).catch(function(e) {
+                toast("保存失败: " + (e.message || "网络错误"), 2);
+            }).finally(function() {
+                btn.disabled = false;
+                btn.textContent = "保存配置";
+            });
+        });
+
+        // Initial status grid
+        refreshStats();
+    }
+
+    // ===== Export report =====
+    function exportReport() {
+        var btn = document.getElementById("exportBtn");
+        var origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "生成中...";
+
+        PlatformUtils.request("/api/patch-analysis/all-hosts").then(function(hosts) {
+            if (!hosts || !hosts.length) { toast("无数据可导出", 2); btn.disabled = false; btn.textContent = origText; return; }
+
+            // Build readable report
+            var lines = [];
+            lines.push("# 补丁安全分析报告");
+            lines.push("");
+            lines.push("> 生成时间：" + new Date().toLocaleString("zh-CN"));
+            lines.push("> 分析主机数：" + hosts.length + " 台");
+            lines.push("");
+            lines.push("---");
+            lines.push("");
+
+            var lvlLabel = {critical:"严重", high:"高危", medium:"中危", low:"低危"};
+
+            hosts.forEach(function(h, idx) {
+                var score = h.riskScore || 0;
+                var lvl = h.riskLevel || "low";
+                var onlineTxt = parseInt(h.status) === 1 ? "在线" : "下线";
+
+                lines.push("## " + (idx+1) + ". " + (h.hostName || h.hostname || "未知主机"));
+                lines.push("");
+                lines.push("| 项目 | 内容 |");
+                lines.push("|------|------|");
+                lines.push("| IP 地址 | " + (h.ipAddress || h.ip_address || "--") + " |");
+                lines.push("| 操作系统 | " + (h.osName || h.os_name || "") + " " + (h.osVersion || h.os_version || "") + " |");
+                lines.push("| 在线状态 | " + onlineTxt + " |");
+                lines.push("| 风险评分 | **" + score + " 分** |");
+                lines.push("| 风险等级 | **" + (lvlLabel[lvl] || lvl) + "** |");
+                lines.push("| 风险项数 | " + (h.riskCount || 0) + "（严重:" + (h.criticalCount||0) + " 高危:" + (h.highCount||0) + " 中危:" + (h.mediumCount||0) + " 低危:" + (h.lowCount||0) + "） |");
+                lines.push("| 分析时间 | " + (h.analyzedAt ? h.analyzedAt.replace("T"," ").substring(0,16) : "未分析") + " |");
+                lines.push("");
+
+                // Risk summary
+                if (score > 0) {
+                    if (lvl === "critical") {
+                        lines.push("> :red_circle: **需要立即处理** — 该系统存在严重安全漏洞，建议尽快安装缺失的安全补丁。");
+                    } else if (lvl === "high") {
+                        lines.push("> :orange_circle: **建议尽快处理** — 该系统存在高危漏洞，请安排补丁更新计划。");
+                    } else if (lvl === "medium") {
+                        lines.push("> :yellow_circle: **需要关注** — 建议在下一个维护窗口内处理。");
+                    } else {
+                        lines.push("> :green_circle: **风险较低** — 保持现有更新策略即可。");
+                    }
+                    lines.push("");
+                } else {
+                    lines.push("> :white_check_mark: 未发现明显的补丁安全风险。");
+                    lines.push("");
+                }
+
+                // AI summary
+                if (h.aiSummary && h.aiSummary.trim()) {
+                    lines.push("### 安全分析总结");
+                    lines.push("");
+                    lines.push(h.aiSummary);
+                    lines.push("");
+                }
+            });
+
+            lines.push("---");
+            lines.push("");
+            lines.push("*本报告由补丁安全分析系统自动生成。风险评分基于 CVE 漏洞知识库与已安装补丁的对比分析。*");
+
+            var report = lines.join("\n");
+            var blob = new Blob([report], {type:"text/markdown;charset=utf-8"});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = "补丁安全分析报告_" + new Date().toISOString().slice(0,10) + ".md";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            toast("报告导出成功", 1);
+            btn.disabled = false;
+            btn.textContent = origText;
+        }).catch(function(e) {
+            toast("导出失败: " + (e.message || "网络错误"), 2);
+            btn.disabled = false;
+            btn.textContent = origText;
+        });
+    }
+})();
+</script>
+</body>
+</html>

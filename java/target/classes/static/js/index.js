@@ -46,8 +46,6 @@ layui.use(["element", "layer"], function () {
             renderCurrentUser(cachedUser);
         }
 
-        openFallbackHomeTab();
-
         if (cachedMenus.length) {
             renderMenus(cachedMenus);
             const cachedDefaultTab = findDefaultTab(cachedMenus);
@@ -60,6 +58,8 @@ layui.use(["element", "layer"], function () {
         } else {
             menuTree.innerHTML = '<li class="menu-empty">正在加载菜单...</li>';
         }
+
+        openFallbackHomeTab();
     }
 
     function hydrateCurrentUser() {

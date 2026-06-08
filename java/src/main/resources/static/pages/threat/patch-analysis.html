@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>补丁安全分析</title>
+    <link rel="stylesheet" href="/css/layui.css?v=3">
+    <link rel="stylesheet" href="/css/app.css?v=3">
+    <style>
+        .analysis-page { padding: var(--space-24); }
+        .analysis-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-24); }
+        .analysis-header h1 { margin: 0; font-size: var(--font-24); font-weight: var(--font-weight-semibold); color: var(--color-text); }
+        .analysis-header p { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-14); }
+
+        .score-gauge { display: flex; align-items: center; gap: var(--space-24); padding: var(--space-24); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-8); margin-bottom: var(--space-20); }
+        .gauge-ring { position: relative; width: 120px; height: 120px; flex-shrink: 0; }
+        .gauge-ring svg { transform: rotate(-90deg); }
+        .gauge-ring .bg { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 10; }
+        .gauge-ring .fill { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 0.8s ease; }
+        .gauge-ring .score-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gauge-ring .score-num { font-size: 32px; font-weight: 700; line-height: 1; }
+        .gauge-ring .score-label { font-size: 11px; color: #8c909f; margin-top: 4px; }
+        .gauge-info { flex: 1; }
+        .gauge-info .host-name { font-size: var(--font-18); font-weight: var(--font-weight-semibold); color: var(--color-text); }
+        .gauge-info .host-meta { font-size: var(--font-13); color: var(--color-text-muted); margin-top: 4px; }
+        .gauge-info .risk-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-top: 10px; }
+        .risk-critical { background: rgba(224,49,49,0.15); color: #e03131; border: 1px solid rgba(224,49,49,0.3); }
+        .risk-high { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+        .risk-medium { background: rgba(79,134,247,0.15); color: #78a4ff; border: 1px solid rgba(79,134,247,0.3); }
+        .risk-low { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+
+        .section-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-8); padding: var(--space-20); margin-bottom: var(--space-20); }
+        .section-card h3 { margin: 0 0 var(--space-16); font-size: var(--font-16); font-weight: var(--font-weight-semibold); color: var(--color-text); display: flex; align-items: center; gap: var(--space-8); }
+        .section-card h3 .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .dot-critical { background: #e03131; }
+        .dot-high { background: #f59e0b; }
+        .dot-medium { background: #4f86f7; }
+        .dot-low { background: #22c55e; }
+
+        .risk-list { list-style: none; padding: 0; margin: 0; }
+        .risk-item { padding: var(--space-16); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--radius-6); margin-bottom: var(--space-12); background: rgba(255,255,255,0.02); }
+        .risk-item:last-child { margin-bottom: 0; }
+        .risk-item .risk-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); }
+        .risk-item .risk-title { font-size: var(--font-14); font-weight: var(--font-weight-semibold); color: var(--color-text); }
+        .risk-item .risk-desc { font-size: var(--font-13); color: var(--color-text-muted); margin-top: 6px; line-height: 1.6; }
+        .risk-item .risk-evidence { font-size: var(--font-12); color: #8c909f; margin-top: 8px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: var(--radius-4); font-family: Consolas, monospace; }
+        .risk-item .risk-recommendation { font-size: var(--font-13); color: #78a4ff; margin-top: 8px; padding-left: 12px; border-left: 2px solid #4f86f7; }
+
+        .sev-tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
+        .sev-critical { background: rgba(224,49,49,0.2); color: #e03131; }
+        .sev-high { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .sev-medium { background: rgba(79,134,247,0.2); color: #78a4ff; }
+        .sev-low { background: rgba(34,197,94,0.2); color: #22c55e; }
+
+        .type-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; background: rgba(255,255,255,0.06); color: #8c909f; margin-right: 8px; }
+
+        .ai-summary { font-size: var(--font-14); color: var(--color-text-muted); line-height: 1.8; white-space: pre-wrap; }
+        .ai-summary strong { color: var(--color-text); }
+
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-64); text-align: center; }
+        .empty-state svg { opacity: 0.3; margin-bottom: var(--space-16); }
+        .empty-state h3 { color: var(--color-text); margin: 0 0 var(--space-8); }
+        .empty-state p { color: var(--color-text-muted); margin: 0; }
+
+        .progress-bar-track { width: 100%; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; margin-top: var(--space-12); overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: #4f86f7; border-radius: 2px; transition: width 0.3s ease; }
+    </style>
+</head>
+<body class="app-body">
+<div class="page-shell">
+<div class="analysis-page">
+
+    <div class="analysis-header">
+        <div>
+            <h1>补丁安全分析</h1>
+            <p id="pageSubtitle">选择主机后开始安全分析</p>
+        </div>
+        <div style="display:flex;gap:8px">
+            <select id="hostSelect" style="min-width:200px;background:#10131a;color:#e1e2eb;border:1px solid rgba(255,255,255,0.10);border-radius:6px;padding:8px 12px;font-size:13px;outline:none">
+                <option value="">-- 选择主机 --</option>
+            </select>
+            <button class="layui-btn layui-btn-primary" id="analyzeBtn">
+                <i class="layui-icon layui-icon-search"></i> 开始分析
+            </button>
+        </div>
+    </div>
+
+    <div id="progressArea" style="display:none">
+        <div class="section-card">
+            <div style="display:flex;align-items:center;gap:12px">
+                <span id="progressStage" style="color:#78a4ff;font-size:14px">正在初始化...</span>
+                <span id="progressPct" style="color:#8c909f;font-size:13px">0%</span>
+            </div>
+            <div class="progress-bar-track"><div class="progress-bar-fill" id="progressBar" style="width:0%"></div></div>
+        </div>
+    </div>
+
+    <div id="resultArea" style="display:none"></div>
+
+    <div id="emptyState" class="empty-state">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+        </svg>
+        <h3>补丁安全分析</h3>
+        <p>选择一个在线主机，系统将自动分析其补丁安全状态并生成报告</p>
+    </div>
+
+</div>
+</div>
+
+<script src="/js/common.js?v=3"></script>
+<script>
+(function () {
+    var hostSelect = document.getElementById("hostSelect");
+    var analyzeBtn = document.getElementById("analyzeBtn");
+    var progressArea = document.getElementById("progressArea");
+    var resultArea = document.getElementById("resultArea");
+    var emptyState = document.getElementById("emptyState");
+
+    // Load hosts
+    PlatformUtils.request("/api/hosts/page?pageSize=100").then(function (r) {
+        var hosts = r.records || [];
+        hosts.forEach(function (h) {
+            var opt = document.createElement("option");
+            opt.value = h.id;
+            opt.textContent = (h.hostname || h.ipAddress || "--") + "  " + (h.ipAddress || "");
+            hostSelect.appendChild(opt);
+        });
+    });
+
+    // Auto-load if hostId is in URL
+    var urlHostId = new URLSearchParams(window.location.search).get("hostId");
+    if (urlHostId) {
+        hostSelect.value = urlHostId;
+        startAnalysis(urlHostId);
+    }
+
+    analyzeBtn.addEventListener("click", function () {
+        var hostId = hostSelect.value;
+        if (!hostId) {
+            if (typeof parent.layui !== "undefined") parent.layui.layer.msg("请先选择主机", { icon: 2 });
+            return;
+        }
+        startAnalysis(hostId);
+    });
+
+    function startAnalysis(hostId) {
+        emptyState.style.display = "none";
+        resultArea.style.display = "none";
+        progressArea.style.display = "block";
+        document.getElementById("progressStage").textContent = "正在提交分析任务...";
+        document.getElementById("progressPct").textContent = "0%";
+        document.getElementById("progressBar").style.width = "0%";
+
+        PlatformUtils.request("/api/patch-analysis/" + hostId + "/async", { method: "POST" })
+            .then(function (resp) {
+                pollTask(resp.taskId, hostId);
+            })
+            .catch(function (err) {
+                progressArea.style.display = "none";
+                emptyState.style.display = "flex";
+                if (typeof parent.layui !== "undefined") parent.layui.layer.msg("分析失败: " + (err.message || ""), { icon: 2 });
+            });
+    }
+
+    function pollTask(taskId, hostId) {
+        var timer = setInterval(function () {
+            PlatformUtils.request("/api/patch-analysis/task/" + taskId)
+                .then(function (task) {
+                    document.getElementById("progressStage").textContent = task.stageText || "处理中...";
+                    document.getElementById("progressPct").textContent = (task.progress || 0) + "%";
+                    document.getElementById("progressBar").style.width = (task.progress || 0) + "%";
+
+                    if (task.status === "COMPLETED") {
+                        clearInterval(timer);
+                        progressArea.style.display = "none";
+                        renderResult(task.result, hostId);
+                    } else if (task.status === "FAILED") {
+                        clearInterval(timer);
+                        progressArea.style.display = "none";
+                        emptyState.style.display = "flex";
+                        if (typeof parent.layui !== "undefined") parent.layui.layer.msg("分析失败: " + (task.message || ""), { icon: 2 });
+                    }
+                })
+                .catch(function () {
+                    clearInterval(timer);
+                    progressArea.style.display = "none";
+                    emptyState.style.display = "flex";
+                });
+        }, 1000);
+    }
+
+    function renderResult(result, hostId) {
+        resultArea.style.display = "block";
+        emptyState.style.display = "none";
+
+        var severityClass = "risk-" + (result.riskLevel || "low");
+        var risks = result.risks || [];
+        var criticalCount = risks.filter(function (r) { return r.severity === "critical"; }).length;
+        var highCount = risks.filter(function (r) { return r.severity === "high"; }).length;
+        var mediumCount = risks.filter(function (r) { return r.severity === "medium"; }).length;
+        var lowCount = risks.filter(function (r) { return r.severity === "low"; }).length;
+
+        var levelLabel = { critical: "严重风险", high: "高风险", medium: "中风险", low: "低风险" }[result.riskLevel] || result.riskLevel;
+
+        // Gauge: circumference = 2*PI*50 = 314.16, dashoffset = circ * (1 - min(score,100)/100)
+        var circ = 314.16;
+        var score = Math.min(result.riskScore || 0, 100);
+        var offset = circ * (1 - score / 100);
+        var gaugeColor = score >= 81 ? "#e03131" : score >= 51 ? "#f59e0b" : score >= 21 ? "#4f86f7" : "#22c55e";
+
+        var html =
+            '<div class="score-gauge">' +
+            '<div class="gauge-ring">' +
+            '<svg width="120" height="120" viewBox="0 0 120 120"><circle class="bg" cx="60" cy="60" r="50"/><circle class="fill" cx="60" cy="60" r="50" stroke="' + gaugeColor + '" stroke-dasharray="' + circ + '" stroke-dashoffset="' + offset + '" style="transition:stroke-dashoffset 1s ease"/></svg>' +
+            '<div class="score-text"><div class="score-num" style="color:' + gaugeColor + '">' + (result.riskScore || 0) + '</div><div class="score-label">风险评分</div></div>' +
+            '</div>' +
+            '<div class="gauge-info">' +
+            '<div class="host-name">' + escapeHtml(result.hostName || "--") + '</div>' +
+            '<div class="host-meta">' + escapeHtml(result.osName || "") + "  " + escapeHtml(result.osVersion || "") + " | " + escapeHtml(result.ipAddress || "") + '</div>' +
+            '<span class="risk-badge ' + severityClass + '">' + levelLabel + '</span>' +
+            '</div>' +
+            '</div>';
+
+        // AI Summary
+        if (result.summary) {
+            html +=
+                '<div class="section-card">' +
+                '<h3>AI安全分析总结</h3>' +
+                '<div class="ai-summary">' + escapeHtml(result.summary) + '</div>' +
+                '</div>';
+        }
+
+        // Risk list
+        html += '<div class="section-card"><h3>风险详情 (' + risks.length + ')</h3><div class="risk-list">';
+        if (risks.length === 0) {
+            html += '<div style="text-align:center;padding:32px;color:#8c909f">未发现安全风险</div>';
+        } else {
+            risks.forEach(function (r) {
+                var typeLabels = { missing_patch: "缺补丁", bad_patch: "补丁异常", patch_not_effective: "未生效", outdated_patch_level: "已过时", unsupported_os: "系统EOL" };
+                html +=
+                    '<div class="risk-item">' +
+                    '<div class="risk-header">' +
+                    '<div><span class="type-tag">' + (typeLabels[r.riskType] || r.riskType) + '</span><span class="risk-title">' + escapeHtml(r.title || "") + '</span></div>' +
+                    '<span class="sev-tag sev-' + (r.severity || "low") + '">' + (r.severity || "") + '</span>' +
+                    '</div>' +
+                    '<div class="risk-desc">' + escapeHtml(r.description || "") + '</div>' +
+                    (r.evidence ? '<div class="risk-evidence">' + escapeHtml(r.evidence) + '</div>' : "") +
+                    (r.recommendation ? '<div class="risk-recommendation">' + escapeHtml(r.recommendation) + '</div>' : "") +
+                    '</div>';
+            });
+        }
+        html += '</div></div>';
+
+        resultArea.innerHTML = html;
+    }
+
+    function escapeHtml(s) {
+        if (!s) return "";
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+})();
+</script>
+</body>
+</html>

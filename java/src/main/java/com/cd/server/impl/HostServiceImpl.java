@@ -63,7 +63,7 @@ public class HostServiceImpl implements HostService {
     @Transactional
     public Host update(Host host) {
         if (host.getId() == null) {
-            throw new BusinessException("主机 ID 不能为空");
+            throw new BusinessException("Host ID cannot be empty");
         }
         Host existing = hostMapper.selectById(host.getId());
         if (existing == null) {
@@ -100,7 +100,7 @@ public class HostServiceImpl implements HostService {
         hostMapper.upsertByMacAddress(host);
         Host saved = hostMapper.selectByMacAddress(host.getMacAddress());
         if (saved == null) {
-            throw new BusinessException("主机入库失败");
+            throw new BusinessException("Host save failed");
         }
         return saved;
     }
@@ -113,6 +113,12 @@ public class HostServiceImpl implements HostService {
             throw new BusinessException("MAC address cannot be empty");
         }
         return hostMapper.updateStatusAndUpdatedAtByMacAddress(normalizedMacAddress, "1") > 0;
+    }
+
+    @Override
+    public java.util.List<Host> listOnlineHosts() {
+        refreshHostStatuses();
+        return hostMapper.selectOnlineHosts();
     }
 
     private void refreshHostStatuses() {
@@ -156,17 +162,14 @@ public class HostServiceImpl implements HostService {
         if (incoming.getOsVersion() != null) {
             existing.setOsVersion(incoming.getOsVersion());
         }
+        if (incoming.getOsBuild() != null) {
+            existing.setOsBuild(incoming.getOsBuild());
+        }
         if (incoming.getStatus() != null) {
             existing.setStatus(incoming.getStatus());
         }
         if (incoming.getLastSeenAt() != null) {
             existing.setLastSeenAt(incoming.getLastSeenAt());
-        }
-        if (incoming.getSourceQueue() != null) {
-            existing.setSourceQueue(incoming.getSourceQueue());
-        }
-        if (incoming.getRawPayload() != null) {
-            existing.setRawPayload(incoming.getRawPayload());
         }
     }
 
@@ -182,21 +185,20 @@ public class HostServiceImpl implements HostService {
         host.setOsName(trimToNull(host.getOsName()));
         host.setOsType(trimToNull(host.getOsType()));
         host.setOsVersion(trimToNull(host.getOsVersion()));
-        host.setSourceQueue(trimToNull(host.getSourceQueue()));
-        host.setRawPayload(trimToNull(host.getRawPayload()));
+        host.setOsBuild(trimToNull(host.getOsBuild()));
         host.setStatus(normalizeStatus(host.getStatus(), createMode));
     }
 
     private void validate(Host host, boolean createMode) {
         if (createMode && host.getHostname() == null) {
-            throw new BusinessException("主机名不能为空");
+            throw new BusinessException("Host name cannot be empty");
         }
         if (host.getMacAddress() == null) {
-            throw new BusinessException("MAC 地址不能为空");
+            throw new BusinessException("MAC address cannot be empty");
         }
         Host duplicated = hostMapper.selectByMacAddress(host.getMacAddress());
         if (duplicated != null && (createMode || !duplicated.getId().equals(host.getId()))) {
-            throw new BusinessException("MAC 地址已存在");
+            throw new BusinessException("MAC address already exists");
         }
     }
 

@@ -1,0 +1,84 @@
+3 |' + PlatformUtils.escapeHtml(host.hostname || "未命名主�?) + '|
+3 |取消|
+2 |主机管理|
+2 |当前没有历史记录|
+2 |资产清单|
+1 |实时展示主机在线状态，支持主机详情查看、资产明细弹窗与自动刷新�?/p>|
+1 |全部状�?/option>|
+1 |在线|
+1 |下线|
+1 |查询|
+1 |重置|
+1 |刷新数据|
+1 |不刷�?/option>|
+1 |当前为手动刷新模�?/div>|
+1 |详情|
+1 |编辑|
+1 |资产探测|
+1 |删除|
+1 |账号|
+1 |服务|
+1 |进程|
+1 |主IP�? + PlatformUtils.escapeHtml(host.ipAddress || "--") + '|
+1 |状态：在线|
+1 |发送探测指�?/button>'
+                + '|
+1 |原始上报数据|
+1 |' + PlatformUtils.escapeHtml(assetMeta.label) + ' 历史记录|
+1 |' + PlatformUtils.escapeHtml(assetMeta.label) + '记录查看|
+1 |主机名：' + PlatformUtils.escapeHtml(host.hostname || "--") + '|
+1 |查看方式|
+1 |单击左侧历史记录可查看详情，勾选两条记录后可并排对比�?/span>'
+                + '|
+1 |单击左侧记录查看详情，勾选两条记录后可以并排对比差异�?/span>'
+                + '|
+1 |AI辅助分析|
+1 |对比选中记录|
+1 |导出清单|
+1 |退出对�?/button>'
+                + '|
+1 |准备开始分�?..|
+1 |请选择一条记录查看详�?/div>')
+                + '|
+1 |记录 #' + PlatformUtils.escapeHtml(String(snapshot.id)) + '|
+1 |最�?/span>' : '')
+                + '|
+1 |更新时间�? + PlatformUtils.escapeHtml(updatedAt || "--") + '|
+1 |记录时间�? + PlatformUtils.escapeHtml(createdAt || "--") + '|
+1 |记录编号�? + PlatformUtils.escapeHtml(String(snapshot.id)) + '|
+1 |对比|
+1 |记录 #' + PlatformUtils.escapeHtml(String(snapshot ? snapshot.id : "--")) + '|
+1 |记录 #' + PlatformUtils.escapeHtml(String(leftSnapshot.id)) + '|
+1 |记录 #' + PlatformUtils.escapeHtml(String(rightSnapshot.id)) + '|
+1 |暂无数据|
+1 |原始消息|
+1 |用于排障和核对上报内�?/span>'
+                + '|
+1 |分析结果|
+1 |风险原因|
+1 |加固建议|
+1 |保存|
+1 |导出主机|
+1 |的最�?|
+1 |数据已自动脱敏处理，密码和IP等敏感信息不会暴露完整内容�?/p>'
+                + '|
+1 |CSV 表格|
+1 |适合�?Excel 打开查看和筛�?/em>'
+                + '|
+1 |JSON 数据|
+1 |适合技术人员做进一步分�?/em>'
+                + '|
+1 |Markdown 文档|
+1 |适合直接阅读，排版清晰规�?/em>'
+                + '|
+1 |开始导�?/button>'
+                + '|
+1 |中风险项|
+1 |文件完整性校验（MD5）：|
+1 |您导出的�?|
+1 |包含|
+1 |条记�?/p>'
+                    + detailParts.join("")
+                    + '|
+1 |知道�?/button>'
+                    + '|

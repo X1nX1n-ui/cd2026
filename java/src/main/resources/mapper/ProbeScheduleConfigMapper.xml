@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.ProbeScheduleConfigMapper">
+
+    <resultMap id="ProbeScheduleConfigResultMap" type="com.cd.entity.ProbeScheduleConfig">
+        <id property="id" column="id"/>
+        <result property="enabled" column="enabled"/>
+        <result property="cronExpression" column="cron_expression"/>
+        <result property="targetType" column="target_type"/>
+        <result property="targetHostIds" column="target_host_ids"/>
+        <result property="probeAccount" column="probe_account"/>
+        <result property="probeService" column="probe_service"/>
+        <result property="probeProcess" column="probe_process"/>
+        <result property="probeApp" column="probe_app"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="selectCurrent" resultMap="ProbeScheduleConfigResultMap">
+        SELECT id, enabled, cron_expression, target_type, target_host_ids,
+               probe_account, probe_service, probe_process, probe_app,
+               created_at, updated_at
+        FROM probe_schedule_config
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO probe_schedule_config (
+            enabled, cron_expression, target_type, target_host_ids,
+            probe_account, probe_service, probe_process, probe_app
+        ) VALUES (
+            #{enabled}, #{cronExpression}, #{targetType}, #{targetHostIds},
+            #{probeAccount}, #{probeService}, #{probeProcess}, #{probeApp}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE probe_schedule_config SET
+            enabled = #{enabled},
+            cron_expression = #{cronExpression},
+            target_type = #{targetType},
+            target_host_ids = #{targetHostIds},
+            probe_account = #{probeAccount},
+            probe_service = #{probeService},
+            probe_process = #{probeProcess},
+            probe_app = #{probeApp},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+</mapper>

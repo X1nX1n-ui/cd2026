@@ -37,6 +37,7 @@ public class DatabaseInitializer {
                 ensureBaseTables(jdbcTemplate);
                 normalizeAssetSnapshotIndexes(jdbcTemplate);
                 ensureUserColumns(jdbcTemplate);
+                ensureHostColumns(jdbcTemplate);
                 normalizeExistingUsers(jdbcTemplate);
                 ensureAdminUser(jdbcTemplate);
                 initializePermissions(jdbcTemplate);
@@ -150,8 +151,7 @@ public class DatabaseInitializer {
                     os_version VARCHAR(128) NULL,
                     status VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
                     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    source_queue VARCHAR(64) NULL,
-                    raw_payload TEXT NULL,
+                    os_build VARCHAR(128) NULL,
                     deleted TINYINT NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -220,6 +220,84 @@ public class DatabaseInitializer {
                     KEY idx_apps_updated_at (updated_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `installed_patch` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    patch_id VARCHAR(128) NOT NULL,
+                    patch_type VARCHAR(64) NULL,
+                    product_name VARCHAR(255) NULL,
+                    product_version VARCHAR(128) NULL,
+                    install_time DATETIME NULL,
+                    install_status VARCHAR(32) NULL,
+                    source VARCHAR(64) NULL,
+                    signature_status VARCHAR(32) NULL,
+                    reboot_required TINYINT(1) NULL,
+                    superseded_by VARCHAR(128) NULL,
+                    is_security_patch TINYINT(1) NULL,
+                    raw_data TEXT NULL,
+                    scan_time DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    KEY idx_installed_patch_mac_address (mac_address),
+                    KEY idx_installed_patch_patch_id (patch_id),
+                    KEY idx_installed_patch_scan_time (scan_time)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `patch_scan_strategy` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    enabled TINYINT(1) NOT NULL DEFAULT 1,
+                    cron_expression VARCHAR(64) NOT NULL DEFAULT '0 0 */6 * * ?',
+                    target_type VARCHAR(32) NOT NULL DEFAULT 'all_online',
+                    target_host_ids TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `installed_patch` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    mac_address VARCHAR(64) NOT NULL,
+                    patch_id VARCHAR(128) NOT NULL,
+                    patch_type VARCHAR(64) NULL,
+                    product_name VARCHAR(255) NULL,
+                    product_version VARCHAR(128) NULL,
+                    install_time DATETIME NULL,
+                    install_status VARCHAR(32) NULL,
+                    source VARCHAR(64) NULL,
+                    signature_status VARCHAR(32) NULL,
+                    reboot_required TINYINT(1) NULL,
+                    superseded_by VARCHAR(128) NULL,
+                    is_security_patch TINYINT(1) NULL,
+                    raw_data TEXT NULL,
+                    scan_time DATETIME NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    KEY idx_installed_patch_mac_address (mac_address),
+                    KEY idx_installed_patch_patch_id (patch_id),
+                    KEY idx_installed_patch_scan_time (scan_time)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS `patch_scan_strategy` (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    enabled TINYINT(1) NOT NULL DEFAULT 1,
+                    cron_expression VARCHAR(64) NOT NULL DEFAULT '0 0 */6 * * ?',
+                    target_type VARCHAR(32) NOT NULL DEFAULT 'all_online',
+                    target_host_ids TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+    }
+
+    private void ensureHostColumns(JdbcTemplate jdbcTemplate) {
+        ensureHostColumn(jdbcTemplate, "os_build", "VARCHAR(128) NULL");
     }
 
     private void ensureUserColumns(JdbcTemplate jdbcTemplate) {
@@ -287,6 +365,7 @@ public class DatabaseInitializer {
         upsertPermission(jdbcTemplate, "告警中心", "threat:alerts:view", PermissionType.MENU, threatRootId, "/pages/threat/alerts.html", "/pages/threat/alerts.html", "bell-ring", 21, 1, "告警中心页面");
         upsertPermission(jdbcTemplate, "攻击链分析", "threat:attack-chain:view", PermissionType.MENU, threatRootId, "/pages/threat/attack-chain.html", "/pages/threat/attack-chain.html", "waypoints", 22, 1, "攻击链分析页面");
         upsertPermission(jdbcTemplate, "风险事件", "threat:risk-events:view", PermissionType.MENU, threatRootId, "/pages/threat/risk-events.html", "/pages/threat/risk-events.html", "siren", 23, 1, "风险事件页面");
+        upsertPermission(jdbcTemplate, "补丁安全", "threat:patch-security:view", PermissionType.MENU, threatRootId, "/pages/threat/patch-security.html", "/pages/threat/patch-security.html", "shield-check", 24, 1, "补丁安全页面");
 
         Long assetRootId = upsertPermission(jdbcTemplate, "资产管理", "asset", PermissionType.MENU, null, null, null, "server", 30, 1, "资产管理菜单");
         upsertPermission(jdbcTemplate, "重点资产", "asset:key-assets:view", PermissionType.MENU, assetRootId, "/pages/assets/key-assets.html", "/pages/assets/key-assets.html", "database", 31, 1, "重点资产页面");
@@ -313,9 +392,14 @@ public class DatabaseInitializer {
         upsertPermission(jdbcTemplate, "新增权限", "sys:permission:create", PermissionType.ACTION, permissionListId, null, null, null, 4301, 0, "新增权限");
         upsertPermission(jdbcTemplate, "修改权限", "sys:permission:update", PermissionType.ACTION, permissionListId, null, null, null, 4302, 0, "修改权限");
         upsertPermission(jdbcTemplate, "删除权限", "sys:permission:delete", PermissionType.ACTION, permissionListId, null, null, null, 4303, 0, "删除权限");
+        upsertPermission(jdbcTemplate, "测试管理", "sys:test:manage", PermissionType.ACTION, permissionListId, null, null, null, 4304, 0, "测试接口管理");
         upsertPermission(jdbcTemplate, "新增主机", "asset:host:create", PermissionType.ACTION, hostManageId, null, null, null, 3301, 0, "新增主机");
         upsertPermission(jdbcTemplate, "修改主机", "asset:host:update", PermissionType.ACTION, hostManageId, null, null, null, 3302, 0, "修改主机");
         upsertPermission(jdbcTemplate, "删除主机", "asset:host:delete", PermissionType.ACTION, hostManageId, null, null, null, 3303, 0, "删除主机");
+        upsertPermission(jdbcTemplate, "资产探测", "asset:host:probe", PermissionType.ACTION, hostManageId, null, null, null, 3304, 0, "向主机发送资产探测指令");
+        upsertPermission(jdbcTemplate, "导出资产", "asset:host:export", PermissionType.ACTION, hostManageId, null, null, null, 3305, 0, "导出主机的资产清单");
+        upsertPermission(jdbcTemplate, "AI分析", "asset:host:analyze", PermissionType.ACTION, hostManageId, null, null, null, 3306, 0, "对资产数据进行AI辅助分析");
+        upsertPermission(jdbcTemplate, "探测策略管理", "asset:probe-schedule:manage", PermissionType.ACTION, hostManageId, null, null, null, 3307, 0, "管理自动探测策略的配置与执行");
     }
 
     private void initializeRoles(JdbcTemplate jdbcTemplate) {
@@ -336,10 +420,15 @@ public class DatabaseInitializer {
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "threat:alerts:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "threat:attack-chain:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "threat:risk-events:view"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "threat:patch-security:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:key-assets:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:exposure-scan:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:host:view"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:detail:view"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:host:probe"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:host:export"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:host:analyze"));
+        ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "asset:probe-schedule:manage"));
         ensureRolePermission(jdbcTemplate, analystRoleId, getPermissionId(jdbcTemplate, "user:profile:view"));
 
         ensureRolePermission(jdbcTemplate, auditorRoleId, getPermissionId(jdbcTemplate, "dashboard:view"));
@@ -367,7 +456,7 @@ public class DatabaseInitializer {
         ensureUserRole(jdbcTemplate, getUserId(jdbcTemplate, "assetops"), analystRoleId);
     }
 
-    private void normalizeAssetSnapshotIndexes(JdbcTemplate jdbcTemplate) {
+            private void normalizeAssetSnapshotIndexes(JdbcTemplate jdbcTemplate) {
         ensureAssetHistoryMode(jdbcTemplate, "accounts", "uk_accounts_mac_address", "idx_accounts_mac_address");
         ensureAssetHistoryMode(jdbcTemplate, "services", "uk_services_mac_address", "idx_services_mac_address");
         ensureAssetHistoryMode(jdbcTemplate, "processes", "uk_processes_mac_address", "idx_processes_mac_address");
@@ -469,6 +558,21 @@ public class DatabaseInitializer {
             return false;
         }
         jdbcTemplate.execute("ALTER TABLE `user` ADD COLUMN " + columnName + " " + columnDefinition);
+        return true;
+    }
+
+    private boolean hasHostColumn(JdbcTemplate jdbcTemplate, String columnName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'hosts' AND column_name = ?",
+                Integer.class, columnName);
+        return count != null && count > 0;
+    }
+
+    private boolean ensureHostColumn(JdbcTemplate jdbcTemplate, String columnName, String columnDefinition) {
+        if (hasHostColumn(jdbcTemplate, columnName)) {
+            return false;
+        }
+        jdbcTemplate.execute("ALTER TABLE `hosts` ADD COLUMN " + columnName + " " + columnDefinition);
         return true;
     }
 

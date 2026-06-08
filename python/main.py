@@ -179,8 +179,9 @@ class AssetProbeListenerService:
                 self.channel.basic_ack(method_frame.delivery_tag)
 
     def _handle_message(self, payload):
-        if payload.get("type") != "assets":
-            self.logger.info("Ignored non-assets message: %s", payload)
+        msg_type = payload.get("type")
+        if msg_type not in ("assets", "hotfix"):
+            self.logger.info("Ignored non-assets/hotfix message: %s", payload)
             return
 
         if not self._is_probe_command(payload):
@@ -196,28 +197,63 @@ class AssetProbeListenerService:
             )
             return
 
+        msg_type = payload.get("type")
+        if msg_type == "hotfix":
+            self.logger.info("[HOTFIX] Received hotfix scan command, starting patch collection...")
         result = self.collector.collect_asset_payload(payload)
+        if msg_type == "hotfix":
+            hotfixes = result.get("hotfixes", [])
+            self.logger.info("[HOTFIX] Patch collection done, found %d patches", len(hotfixes))
         self._publish_asset_results(result)
-        self.logger.info("Asset probe completed for message: %s", payload)
+        if msg_type == "hotfix":
+            self.logger.info("[HOTFIX] Publishing results back to sysinfo_exchange with routing_key=hotfix")
+        self.logger.info("Asset probe completed for message type=%s", msg_type)
 
     def _connect(self):
         if self.connection and self.connection.is_open and self.channel and self.channel.is_open:
             return
 
+        self.logger.info("Connecting to RabbitMQ for asset probe listener...")
         parameters = build_connection_parameters(self.config)
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
+        self.logger.info("RabbitMQ connected, declaring resources...")
+
+        # Declare sysinfo_exchange (for publishing results back)
         self.channel.exchange_declare(
             exchange=self.config.exchange,
             exchange_type=self.config.exchange_type,
             durable=True,
         )
+        self.logger.info("Exchange declared: %s", self.config.exchange)
+
+        # Declare agent_exchange (for receiving commands from Java)
+        self.channel.exchange_declare(
+            exchange="agent_exchange",
+            exchange_type="direct",
+            durable=True,
+        )
+        self.logger.info("Exchange declared: agent_exchange")
+
+        # Declare the agent queue
         self.channel.queue_declare(queue=self.queue_name, durable=True)
+        self.logger.info("Queue declared: %s", self.queue_name)
+
+        # Bind to agent_exchange with MAC as routing key (commands from Java)
+        self.channel.queue_bind(
+            exchange="agent_exchange",
+            queue=self.queue_name,
+            routing_key=self.local_mac_address,
+        )
+        self.logger.info("Queue bound: agent_exchange -> %s (routing_key=%s)", self.queue_name, self.local_mac_address)
+
+        # Also bind to sysinfo_exchange (for any sysinfo-tagged messages)
         self.channel.queue_bind(
             exchange=self.config.exchange,
             queue=self.queue_name,
             routing_key=self.queue_name,
         )
+        self.logger.info("Queue bound: %s -> %s (routing_key=%s)", self.config.exchange, self.queue_name, self.queue_name)
 
     def _close_connection(self):
         try:
@@ -238,11 +274,33 @@ class AssetProbeListenerService:
             self.publisher = RabbitMQPublisher(self.config, self.logger)
 
         for probe_type, payload in self._build_publish_payloads(result):
-            self.publisher.publish_dict(
-                payload,
-                routing_key=probe_type,
-                exchange=self.config.exchange,
-            )
+            if probe_type == "hotfix":
+                hotfix_count = payload.get("hotfix_count", 0)
+                self.logger.info("[HOTFIX] Publishing %d patches to exchange=%s routing_key=%s", hotfix_count, self.config.exchange, probe_type)
+            try:
+                self.publisher.publish_dict(
+                    payload,
+                    routing_key=probe_type,
+                    exchange=self.config.exchange,
+                )
+                if probe_type == "hotfix":
+                    self.logger.info("[HOTFIX] Published hotfix results successfully")
+            except Exception:
+                self.logger.exception("[HOTFIX] Failed to publish %s results!", probe_type)
+                # Try to reconnect and republish once
+                try:
+                    if self.publisher:
+                        self.publisher.close()
+                    self.publisher = RabbitMQPublisher(self.config, self.logger)
+                    self.publisher.publish_dict(
+                        payload,
+                        routing_key=probe_type,
+                        exchange=self.config.exchange,
+                    )
+                    if probe_type == "hotfix":
+                        self.logger.info("[HOTFIX] Published hotfix results successfully (retry)")
+                except Exception:
+                    self.logger.exception("[HOTFIX] Retry also failed for %s!", probe_type)
 
     @staticmethod
     def _normalize_mac_address(mac_address):
@@ -253,7 +311,7 @@ class AssetProbeListenerService:
 
     @staticmethod
     def _is_probe_command(payload):
-        probe_fields = ("account", "service", "process", "app")
+        probe_fields = ("account", "service", "process", "app", "hotfix")
         for field in probe_fields:
             try:
                 if int(payload.get(field, 0) or 0) == 1:
@@ -271,6 +329,7 @@ class AssetProbeListenerService:
             ("service", ("services", "service_count")),
             ("process", ("processes", "process_count")),
             ("app", ("apps", "app_count")),
+            ("hotfix", ("hotfixes", "hotfix_count")),
         )
 
         for probe_type, fields in publish_specs:

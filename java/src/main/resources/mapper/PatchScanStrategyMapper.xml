@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.PatchScanStrategyMapper">
+
+    <resultMap id="PatchScanStrategyResultMap" type="com.cd.entity.PatchScanStrategy">
+        <id property="id" column="id"/>
+        <result property="enabled" column="enabled"/>
+        <result property="cronExpression" column="cron_expression"/>
+        <result property="targetType" column="target_type"/>
+        <result property="targetHostIds" column="target_host_ids"/>
+        <result property="timeoutMinutes" column="timeout_minutes"/>
+        <result property="concurrency" column="concurrency"/>
+        <result property="retryCount" column="retry_count"/>
+        <result property="aiAnalysisEnabled" column="ai_analysis_enabled"/>
+        <result property="lastExecutedAt" column="last_executed_at"/>
+        <result property="nextExecutionAt" column="next_execution_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="selectConfig" resultMap="PatchScanStrategyResultMap">
+        SELECT * FROM `patch_scan_strategy` LIMIT 1
+    </select>
+
+    <insert id="upsert" parameterType="com.cd.entity.PatchScanStrategy">
+        INSERT INTO `patch_scan_strategy` (
+            id, enabled, cron_expression, target_type, target_host_ids,
+            timeout_minutes, concurrency, retry_count, ai_analysis_enabled,
+            last_executed_at, next_execution_at
+        ) VALUES (
+            COALESCE(#{id}, 1),
+            #{enabled}, #{cronExpression}, #{targetType}, #{targetHostIds},
+            COALESCE(#{timeoutMinutes}, 10), COALESCE(#{concurrency}, 20), COALESCE(#{retryCount}, 3), COALESCE(#{aiAnalysisEnabled}, 1),
+            #{lastExecutedAt}, #{nextExecutionAt}
+        )
+        ON DUPLICATE KEY UPDATE
+            enabled = VALUES(enabled),
+            cron_expression = VALUES(cron_expression),
+            target_type = VALUES(target_type),
+            target_host_ids = VALUES(target_host_ids),
+            timeout_minutes = VALUES(timeout_minutes),
+            concurrency = VALUES(concurrency),
+            retry_count = VALUES(retry_count),
+            ai_analysis_enabled = VALUES(ai_analysis_enabled),
+            last_executed_at = VALUES(last_executed_at),
+            next_execution_at = VALUES(next_execution_at)
+    </insert>
+
+</mapper>

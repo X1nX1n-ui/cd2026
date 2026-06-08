@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.cd.mapper.InstalledPatchMapper">
+
+    <resultMap id="InstalledPatchResultMap" type="com.cd.entity.InstalledPatch">
+        <id property="id" column="id"/>
+        <result property="macAddress" column="mac_address"/>
+        <result property="patchId" column="patch_id"/>
+        <result property="patchType" column="patch_type"/>
+        <result property="productName" column="product_name"/>
+        <result property="productVersion" column="product_version"/>
+        <result property="installTime" column="install_time"/>
+        <result property="installStatus" column="install_status"/>
+        <result property="source" column="source"/>
+        <result property="signatureStatus" column="signature_status"/>
+        <result property="rebootRequired" column="reboot_required"/>
+        <result property="supersededBy" column="superseded_by"/>
+        <result property="isSecurityPatch" column="is_security_patch"/>
+        <result property="rawData" column="raw_data"/>
+        <result property="scanTime" column="scan_time"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="insertBatch" parameterType="list">
+        INSERT INTO `installed_patch` (
+            mac_address, patch_id, patch_type, product_name, product_version,
+            install_time, install_status, source, signature_status,
+            reboot_required, superseded_by, is_security_patch, raw_data, scan_time
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+            #{item.macAddress}, #{item.patchId}, #{item.patchType}, #{item.productName}, #{item.productVersion},
+            #{item.installTime}, #{item.installStatus}, #{item.source}, #{item.signatureStatus},
+            #{item.rebootRequired}, #{item.supersededBy}, #{item.isSecurityPatch}, #{item.rawData}, #{item.scanTime}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteByMacAddress">
+        DELETE FROM `installed_patch`
+        WHERE mac_address = #{macAddress}
+    </delete>
+
+    <select id="selectByMacAddress" resultMap="InstalledPatchResultMap">
+        SELECT * FROM `installed_patch`
+        WHERE mac_address = #{macAddress}
+        ORDER BY install_time DESC
+    </select>
+
+    <select id="selectByMacAddressAndScanTime" resultMap="InstalledPatchResultMap">
+        SELECT * FROM `installed_patch`
+        WHERE mac_address = #{macAddress}
+          AND scan_time >= #{scanTime}
+        ORDER BY install_time DESC
+    </select>
+
+</mapper>

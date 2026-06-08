@@ -658,6 +658,70 @@ public class UserServerImpl implements UserServer {
         log.info("????????, userId={}", userId);
     }
 
+    @Override
+    public void sendPasswordResetCode(String username) {
+        User user = userMapper.selectByUserName(username.trim());
+        if (user == null) {
+            throw new BusinessException("\u7528\u6237\u4e0d\u5b58\u5728");
+        }
+
+        String email = user.getUserEmail();
+        if (isBlank(email)) {
+            throw new BusinessException("\u8be5\u8d26\u6237\u672a\u7ed1\u5b9a\u90ae\u7bb1\uff0c\u65e0\u6cd5\u91cd\u7f6e\u5bc6\u7801");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        if (user.getPasswordChangeLockedUntil() != null && user.getPasswordChangeLockedUntil().isAfter(now)) {
+            throw new BusinessException("\u64cd\u4f5c\u8fc7\u4e8e\u9891\u7e41\uff0c\u8bf715\u5206\u949f\u540e\u91cd\u8bd5");
+        }
+
+        String code = generateVerificationCode();
+        LocalDateTime expireTime = now.plusMinutes(VERIFICATION_CODE_EXPIRE_MINUTES);
+
+        userMapper.updateEmailVerificationCode(user.getId(), code, expireTime);
+
+        try {
+            emailSenderService.sendVerificationCode(email, code, VERIFICATION_CODE_EXPIRE_MINUTES);
+        } catch (Exception e) {
+            userMapper.clearEmailVerificationCode(user.getId());
+            throw new BusinessException("\u9a8c\u8bc1\u7801\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(String username, String code, String newPassword) {
+        User user = userMapper.selectByUserName(username.trim());
+        if (user == null) {
+            throw new BusinessException("\u7528\u6237\u4e0d\u5b58\u5728");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (isBlank(code)) {
+            throw new BusinessException("\u8bf7\u8f93\u5165\u9a8c\u8bc1\u7801");
+        }
+        if (isBlank(user.getEmailVerificationCode())) {
+            throw new BusinessException("\u8bf7\u5148\u83b7\u53d6\u9a8c\u8bc1\u7801");
+        }
+        if (user.getEmailVerificationExpire() == null || user.getEmailVerificationExpire().isBefore(now)) {
+            userMapper.clearEmailVerificationCode(user.getId());
+            throw new BusinessException("\u9a8c\u8bc1\u7801\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u83b7\u53d6");
+        }
+        if (!code.trim().equals(user.getEmailVerificationCode())) {
+            throw new BusinessException("\u9a8c\u8bc1\u7801\u9519\u8bef\uff0c\u8bf7\u91cd\u8bd5");
+        }
+
+        validatePasswordStrength(newPassword);
+
+        String hashedPassword = Argon2PasswordEncoder.encode(newPassword);
+        userMapper.updatePassword(user.getId(), hashedPassword);
+        userMapper.clearEmailVerificationCode(user.getId());
+
+        log.info("Password reset via email, userId={}", user.getId());
+    }
+
+
     /**
      * ?????????R12????????+??+???????????
      */
